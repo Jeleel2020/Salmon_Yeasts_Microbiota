@@ -84,10 +84,6 @@ b <- as.data.frame(b)
 
 
 ##Rarefied the phyloseq object based on minimum sequence size in the sample. This is for normalization of the sequence for checking some of the beta diversity indices. This is explain further below. The phyloseq object are rarefied to minium sequence (i.e. 1687 in this case)
-# Ordination
-#As beta-diversity metrics are sensitive to differences in the sequencing depth of samples, a common way to mitagete this problem is to rarefy the feature table, i.e., downsample count data to the lowest count in the dataset. However, rarefying results in loss of sequence data and throws away samples with extremely low sequence counts. Alternative approaches for normaizing library sizes have been proposed [(McMurdie et al., 2014)](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1003531), such as DESeq2’s variance stabilization technique [(Love et al., 2014)](https://www.ncbi.nlm.nih.gov/pubmed/25516281) and metagenomeSeq’s CSS [(Paulson et al., 2013)](https://www.nature.com/articles/nmeth.2658)). While these alternative methods showed promising results, they are not reccomended for presence/absence metrics, such as Jaccard or unweighted-UniFrac, as the resulting ordination may be distorted. For the presence/absence metrics, rarefying is the best solution at present. [(Weiss et al., 2017)](https://microbiomejournal.biomedcentral.com/articles/10.1186/s40168-017-0237-y)). 
-
-#Another apporach to get around the issue of differential sequencing depth is to analyze the microbiome sequence data using compositional data analysis approaches. Microbiome sequence data are compositional, i.e., they are represented by relative abundances or proportions which individually carry no meaning for the absolute abundance of a specific feature [(Aitchison, 1986)](https://www.jstor.org/stable/2345821?seq=1#metadata_info_tab_contents). Applying standard statistical tools, such as *t*-test, Wilcoxon rank-sum test, *ANOVA* and Pearson correlation coefficient, directly to compositional data produces spurious resutls. The first step of compositional data analysis is to convert the relative abundances of each part, or the values in the table of counts for each part, to ratios between all parts, such that existing statistical methods may be applied without introducing spurious conclusions [(Gloor et al., 2017)](https://www.frontiersin.org/articles/10.3389/fmicb.2017.02224/full). Commonly used data transformation include centered log-ratio transformation (CLR) and isometric log-ration transformation (ISL), during which the differences in the library sizes are cancelled out. This means that all the samples and sequence data are used without having to fit a distribution model to the data. Recently developed methods for beta-diversity analysis that take into account the compositional nature of the microbiome sequence data include PhILR and roboust Aitchison PCA.
 
 #In this section, both unweighted (presence/absence) and weighted metrics, computed from rarefied and unrarefied feature table respectively, will be used for ordination.
 
@@ -154,9 +150,6 @@ p_uwuf <- ggplot(pco_uwuf, aes(x = Axis.1, y = Axis.2, color = factor(Diet, c("F
 p_uwuf
 ```
 
-
-
-
 ##Plotting the PCOA for unweighted unifrac (interactive 3D plot)
 ```{r pcoa_uwuf_3d}
 plot_ly(x = pco_uwuf[,"Axis.1"], y = pco_uwuf[,"Axis.2"], z = pco_uwuf[,"Axis.3"], 
@@ -217,8 +210,6 @@ plot_ly(x = pco_jac[,"Axis.1"], y = pco_jac[,"Axis.2"], z = pco_jac[,"Axis.3"],
 ####Beta diversity - Robust Aitchison PCA and Phylogenetic Isometric Log-Ratio Transform (PHLR) on full phyloseq object 
 
 #### Roboust Aitchison PCA
-##Roboust Aitchison PCA (RPCA) is a compositional beta diversity metric rooted in a centered log-ratio transformation and matrix completion [(Martino et al., 2019)](https://msystems.asm.org/content/4/1/e00016-19). Aitchison distance was used as the distance metric in the roboust Aitchison PCA for its desirable properties: 1)scale invariant, which ensures equivalence between distances computed from absolute and relative abundance measurements, negating the need to perform rarefaction; 2)relative changes driven. Microbes that display large fold change across samples will be weighted more heavily, which makes the ordination roboust to random fluctuations of high-abundant taxa; 3)subcompositionally coherent, which guarantees that distances will never decrease if additional taxa are observed. HOwever, Aitchison distance cannot handle zeros and is thus challenging to apply to the sparse microbiome data. To circumvent this issue, RPCA treats all zeros as missing values and builds a model to handle this missing data using matrix completion. 
-
 
 ##Note that RPCA is not exactly performing PCA. It is performing PCoA using the Aitchison distance, which is calculated from the Euclidean distance of the clr-transformed data. Since PCoA with Euclidean distance is equivalent to PCA, the method is called PCA though it's in fact running PCoA.
 
@@ -271,7 +262,6 @@ plot_ly(x = pco_aitchison[,"PC1"], y = pco_aitchison[,"PC2"], z = pco_aitchison[
 
 
 # PCoA of Euclidean distance calculated on PhILR transformed data
-##PhILR is short for "Phylogenetic Isometric Log-Ratio Transform". The goal of PhILR is to transform compositional data into an orthogonal unconstrained space (real space) with phylogenetic / evolutionary interpretation while preserving all information contained in the original composition. For a given set of samples consisting of measurements of taxa, we transform data into a new space of  samples and  orthonormal coordinates termed ‘balances’. Each balance is associated with a single internal node  of a phylogenetic tree with the taxa as leaves. The balance represents the log-ratio of the geometric mean abundance of the two groups of taxa that descend from the given internal node. More details on this method can be found in the paper ["A phylogenetic transform enhances analysis of compositional microbiota data"](https://elifesciences.org/content/6/e21887). 
 
 ### Filter and transform the feature table
 ##In the original paper and *PhILR* pakcage tutorial, taxa that were not seen with more than 3 counts in at least 20% of samples or with a coefficient of variation ≤ 3 were filtered. For the present data set, we'll not do data filtering as it results in great loss of data. We'll just add a pseudocount of 1 to the feature table to avoid calculating log-ratios involving zeros. 
@@ -324,13 +314,6 @@ tree
 
 ### Transform data using PhILR
 ##The function `philr::philr()` implements a user friendly wrapper for the key steps in the philr transform. 
-
-##1. Convert the phylogenetic tree to its sequential binary partition (SBP) representation using the function `philr::phylo2sbp()`
-##2. Calculate the weighting of the taxa (aka parts) or use the user specified weights
-##3. Built the contrast matrix from the SBP and taxa weights using the function `philr::buildilrBasep()`
-##4. Convert ASV table to relative abundance (using `philr::miniclo()`) and 'shift' dataset using the weightings via the function `philr::shiftp()`.
-##5. Transform the data to PhILR space using the function `philr::ilrp()`
-##6. (Optional) Weight the resulting PhILR space using phylogenetic distance. These weights are either provided by the user or can be calculated by the function `philr::calculate.blw()`. 
 
 ##Note: The preprocessed ASV table should be passed to the function `philr::philr()` before it is closed (normalized) to relative abundances, as some of the preset weightings of the taxa use the original count data to down weight low abundance taxa. 
 
@@ -408,9 +391,9 @@ ps <- plot_grid(
 # Add legend to the assembled plot
 plot_grid(ps, legend, rel_widths = c(6, 1))
 # Export the plot
-ggsave("Figure 4.tiff", width = 10, height = 6,
+ggsave("Figure 6.tiff", width = 10, height = 6,
        units = "in", dpi = 300, compression = "lzw")
-ggsave("Figure 4.pdf", width = 10, height = 6,
+ggsave("Figure 6.pdf", width = 10, height = 6,
        units = "in", dpi = 300)
 
 ```
@@ -451,7 +434,6 @@ write.csv(pw_uwuf, file = "PERMANOVA for unweighted unifrac", row.names = FALSE)
 write.csv(pw_uwuf_full, file = "PERMANOVA for unweighted unifrac for the diets", row.names = FALSE)
 
 ```
-
 
 #PERMANOVA pariwise comparison for jaccard distance
 ```{r}
@@ -649,9 +631,9 @@ bps <- plot_grid(
 # Add legend to the assembled plot
 plot_grid(bps, legend, rel_widths = c(6, 1))
 # Export the plot
-ggsave("Figure S9.tiff", width = 10, height = 6,
+ggsave("Figure S7.tiff", width = 10, height = 6,
        units = "in", dpi = 300, compression = "lzw")
-ggsave("Figure S9.pdf", width = 10, height = 6,
+ggsave("Figure S7.pdf", width = 10, height = 6,
        units = "in", dpi = 300)
 ```
 
