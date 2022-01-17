@@ -22,12 +22,18 @@ Content of files in this resposiotry
       - 06_individual_taxa_comparisons -- visualization and statistical analysis of the top 15 abundant taxa
       - 07_Metabolic_reaction_analysis.ipynb -- analysis of predictive metabolic reactions
 - Data -- all data used and generated during the analysis
+  - Data_microbiota_analysis. These are the rds files saved during the analysis
+     - 01_metadata.csv
+     - 02_ps.nocontam.rds
+     - 03_ps_nocontam_mock.rds
+     - 04_contam_neg.rds
+     - 05_ps_LULU.rds
   - Data_Metabolic_reaction_analysis -- all the data used in the metabolic reaction analysis
   - Figure_contaminants -- figures used for identifying the contaminants
     - 01_prevalence_contam.pdf
     - 02_DNA_concentration.pdf
     - 03_frequency_contam.pdf
     - 04_prevalence_contam_mock.pdf
-   - Data_rem -- Other important data generated during the analysis
-     - 0_metadata.csv -- the sample metadata
-     - 
+
+LICENSE
+README.md
