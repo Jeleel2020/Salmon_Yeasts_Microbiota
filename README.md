@@ -29,6 +29,12 @@ Content of files in this resposiotry
      - 04_contam_neg.rds
      - 05_ps_LULU.rds
   - Data_Metabolic_reaction_analysis -- all the data used in the metabolic reaction analysis
+  - Data_pre_processing
+    - 01_seqtab1
+    - 02_seqtab2
+    - 03_seqtab.nochim
+    - 04_seqtab.taxa
+    - 05_setab.mitochon
   - Figure_contaminants -- figures used for identifying the contaminants
     - 01_prevalence_contam.pdf
     - 02_DNA_concentration.pdf
