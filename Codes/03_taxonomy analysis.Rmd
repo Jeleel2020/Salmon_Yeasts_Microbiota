@@ -577,10 +577,10 @@ plot_grid(p_phy_ind + theme(legend.position = "none", axis.text.x = element_text
           labels = c("A", "", "B", ""), ncol = 2, align = 'hv', axis = "tb", 
           rel_widths = c(3, 1, 3, 1)) 
 # Export the plot
-ggsave(("Figure 1.tiff"), width = 14, height = 10, 
+ggsave(("Figure 2.tiff"), width = 14, height = 10, 
        units = "in", dpi = 300, compression = "lzw")
 # Export the plot as a pdf file
-ggsave("Figure 1.pdf", width = 14, height = 10, 
+ggsave("Figure 2.pdf", width = 14, height = 10, 
        units = "in", dpi = 300)
 ```
 
@@ -598,10 +598,10 @@ plot_grid(p_phy_ind1 + theme(legend.position = "none"),
           rel_widths = c(2, 1, 2, 1)) 
 
 # Export the plot
-ggsave(("Figure S5.tiff"), width = 14, height = 10, 
+ggsave(("Figure 1.tiff"), width = 14, height = 10, 
        units = "in", dpi = 300, compression = "lzw")
 # Export the plot as a pdf file
-ggsave("Figure S5.pdf", width = 14, height = 10, 
+ggsave("Figure 1.pdf", width = 14, height = 10, 
        units = "in", dpi = 300)
 
 ```
@@ -619,10 +619,10 @@ plot_grid(p_phy_ind2 + theme(legend.position = "none"),
           labels = c("A", "", "B", ""), ncol = 2, align = 'hv', axis = "tb", 
           rel_widths = c(1, 1, 1, 1)) 
 # Export the plot
-ggsave(("Figure S6.tiff"), width = 14, height = 10, 
+ggsave(("Figure S5.tiff"), width = 14, height = 10, 
        units = "in", dpi = 300, compression = "lzw")
 # Export the plot as a pdf file
-ggsave("Figure S6.pdf", width = 14, height = 10, 
+ggsave("Figure S5.pdf", width = 14, height = 10, 
        units = "in", dpi = 300)
 
 ```
@@ -666,7 +666,7 @@ core_taxa_tab %>%
 ```
 ##Here, we explore the core taxa as table possibly for use as supplementary material in the manuscript
 ```{r, include=FALSE}
-# Export core taxa table as Table S2
+# Export core taxa table as Table S3
 core_taxa_tab %>%
   gt() %>%
   tab_header(title = "Table S2. The prevalence of core ASVs in different sample types.") %>%
@@ -680,7 +680,7 @@ core_taxa_tab %>%
   tab_style(style = list(cell_text(weight = "bold", size = 14), cell_borders(sides = "top", color = "white")),
             locations = cells_title(groups = "title")) %>%
   tab_options(table.font.size = 12, column_labels.font.size = 12, source_notes.font.size = 12) %>%
-  gtsave("Table S4.html")
+  gtsave("Table S3.html")
 openxlsx::write.xlsx(core_taxa_tab, file = "Table S4.xlsx")
 ```
 
@@ -719,7 +719,7 @@ venn1 <- venn(core_taxa_venn1[2:5], ellipse = TRUE, zcolor = brewer.pal(n = 12, 
 ##Venn1
 ```{r, include=FALSE}
 # Export the plot
-tiff("Figure S8a.tiff", compression = "lzw", units = "in", res = 300, height = 6, width = 6)
+tiff("Figure S6a.tiff", compression = "lzw", units = "in", res = 300, height = 6, width = 6)
 venn(core_taxa_venn[2:5], ellipse = TRUE, zcolor = brewer.pal(n = 12, name = "Paired")[c(1,2,7,8)], 
      ilcs = 1.2, sncs = 1, box = FALSE)
 dev.off()
@@ -728,7 +728,7 @@ dev.off()
 ##Venn2
 ```{r}
 # Export the plot
-tiff("Figure S8b.tiff", compression = "lzw", units = "in", res = 300, height = 6, width = 6)
+tiff("Figure S6b.tiff", compression = "lzw", units = "in", res = 300, height = 6, width = 6)
 venn(core_taxa_venn1[2:5], ellipse = TRUE, zcolor = brewer.pal(n = 12, name = "Paired")[c(1,2,7,8)],
      ilcs = 1.2, sncs = 1, box = FALSE)
 dev.off()
@@ -970,18 +970,18 @@ Assemble plots
 bp_shared_feed + bp_shared_water
 ```
 
-Figure 6
+Figure 4
 
 ```{r}
 library(patchwork)
-fig2a <- ovrl_bar_feed + bp_shared_feed + 
+fig4a <- ovrl_bar_feed + bp_shared_feed + 
   plot_layout(guides = "collect") +
   plot_annotation(tag_levels = list(c("a", ""))) &
   theme(
     legend.position = "top",
     legend.margin = margin(0, 0, 0, 0),
     legend.box.margin = margin(10, 10, 10, 10))
-fig2b <- ovrl_bar_water + bp_shared_water +
+fig4b <- ovrl_bar_water + bp_shared_water +
   plot_layout(guides = "collect") +
   plot_annotation(tag_levels = list(c("b", ""))) &
   theme(
@@ -991,10 +991,10 @@ fig2b <- ovrl_bar_water + bp_shared_water +
 wrap_elements(full = fig2a) | wrap_elements(full = fig2b) 
 
 # export plot
-ggsave(("Figure 2.tiff"), width = 10, height = 5,
+ggsave(("Figure 4.tiff"), width = 10, height = 5,
        units = "in", dpi = 300, compression = "lzw")
 
-ggsave(("Figure 2.pdf"), width = 10, height = 5,
+ggsave(("Figure 4.pdf"), width = 10, height = 5,
        units = "in", dpi = 300)
 
 ```
