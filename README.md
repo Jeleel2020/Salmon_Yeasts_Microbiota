@@ -13,8 +13,8 @@ Content of files in this resposiotry
 
   -  Functions -- These are the functions used for graphs
      - 01_plot_frequency.R -- function used in code '02_Pre-processing.Rmd'. This was used to identify the contaminants in the sample
-     - 01_plot_prevalence.R -- function used in code '02_Pre-processing.Rmd'. This was used to identify the contaminants in the sample
-     - 01_make_taxa_barplot.R -- function used in code '02_Taxonomic_analysis.Rmd'. This was used to create the taxonomic figures
+     - 02_plot_prevalence.R -- function used in code '02_Pre-processing.Rmd'. This was used to identify the contaminants in the sample
+     - 03_make_taxa_barplot.R -- function used in code '02_Taxonomic_analysis.Rmd'. This was used to create the taxonomic figures
   - 01_Sequence_denoising_dada2.Rmd -- processing of raw data using DADA2 to generate ASV table
   - 02_Pre_processing.Rmd -- creating phyloseq object and pre-processing to remove features
   - 03_Taxonomic_analysis.Rmd -- analysis and visualization of taxonomic composition, core ASVs and microbial overlap
