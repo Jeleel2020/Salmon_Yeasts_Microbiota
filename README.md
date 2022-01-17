@@ -9,8 +9,6 @@ This repository contains the codes used to generate the figures in the manuscrip
 
 Content of files in this resposiotry
 
-- Code -- The scripts used for all the analysis in the manuscript
-
   -  Functions -- These are the functions used for graphs
      - 01_plot_frequency.R -- function used in code '02_Pre-processing.Rmd'. This was used to identify the contaminants in the sample
      - 02_plot_prevalence.R -- function used in code '02_Pre-processing.Rmd'. This was used to identify the contaminants in the sample
