@@ -108,7 +108,7 @@ ps_nocontam@sam_data[1:10,]
 
 ```
 
-Make a new phyloseq object and add a phylogenetic tree
+##Make a new phyloseq object and add a phylogenetic tree
 ```{r}
 random_tree = rtree(ntaxa(ps_nocontam), rooted=TRUE, tip.label=taxa_names(ps_nocontam))
 ps_nocontam1 = merge_phyloseq(ps_nocontam, sam_data, random_tree)
@@ -116,13 +116,12 @@ ps_nocontam1
 
 ```
 
-Plotting the phylogenetic tree - not well defined
+##Plotting the phylogenetic tree - not well defined
 ```{r}
 plot_tree(ps_nocontam1, color="Diet", label.tips="taxa_names", ladderize="left", plot.margin=0.3)
 ```
 
-Extract metadata from the phyloseq object and subset the phyloseq object to create a new phyloseq object with digesta samples only
-
+##Extract metadata from the phyloseq object and subset the phyloseq object to create a new phyloseq object with digesta samples only
 
 ```{r}
 # Extract metadata from the phyloseq object
@@ -178,8 +177,8 @@ p
 ```
 
 
-Alpha-diversity group significance
-The statisitical difference between the diets for the four alpha diversity measurements were evaluated using kruska-walis test and the significance between diets were identified with pairwise wilcox test.
+##Alpha-diversity group significance
+##The statisitical difference between the diets for the four alpha diversity measurements were evaluated using kruska-walis test and the significance between diets were identified with pairwise wilcox test.
 ##Flitering the adiv dataframe into each alpha diversity index
 
 ```{r}
@@ -198,7 +197,7 @@ adiv_f <- adiv %>%
 
 ```
 
-Test the diet effect on alpha diversity indices - Kruska-walis test
+##Test the diet effect on alpha diversity indices - Kruska-walis test
 
 ```{r}
 ##Statistics for observed ASVs
@@ -216,8 +215,8 @@ kruskal.test(value ~ Diet, data = adiv_f)
 ```
 
 
-Pair-wise comparison
-The P-values for alpha diversity indices (observed ASVs, Pielou's evenness, Shannon's index and Faith's PD) were less than 0.0001. Thus, we proceed to use wilcox pairwise comparison to identify differences between diets.
+##Pair-wise comparison
+##The P-values for alpha diversity indices (observed ASVs, Pielou's evenness, Shannon's index and Faith's PD) were less than 0.0001. Thus, we proceed to use wilcox pairwise comparison to identify differences between diets.
 
 ```{r}
 ##Statistics for observed ASVs
@@ -246,7 +245,7 @@ openxlsx::write.xlsx(wilcox_f, file = "Wilcox pairwise comparison_Faith's PD.xls
 ```
 
 
-The script below is just to improve the quality of the figure
+##The script below is just to improve the quality of the figure
 
 ```{r}
 # Make a list of alpha-diversity plots
@@ -290,7 +289,7 @@ ggsave("Figure 5.pdf", width = 8, height = 9,
 ```
 
 
-Save files
+##Save files
 
 ```{r}
 saveRDS(ps_nocontam1, file="ps_nocontam1.rds")
