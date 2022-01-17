@@ -1,0 +1,315 @@
+---
+title: "Untitled"
+author: "Jeleel"
+date: "11/9/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load the required packages
+```{r}
+library(Rcpp)
+library(dada2)
+library(phyloseq)
+library(permute)
+library(lattice)
+library(vegan)
+library(ggplot2)
+library(tidyverse)
+library(ggstatsplot)
+library(dplyr)
+library(microbiome)
+library(microbiomeutilities)
+library(knitr)
+library(RColorBrewer)
+library(DT)
+library(gt)
+library(cowplot)
+library(PerformanceAnalytics)
+library(venn)
+library(philr)
+library(MicrobeR)
+library("ape")
+library(Biostrings)
+library(gridExtra)
+library(ggsignif)
+library(lmerTest) 
+library(ggResidpanel) 
+library(emmeans)
+library(picante)
+set.seed(1910)
+library(ggpubr)
+
+# Check package versions
+
+packageVersion("microbiome")
+packageVersion("picante")
+
+```
+
+Read the previously saved phyloseq object and extract the count table, tax table and metadata
+
+```{r}
+setwd ("/net/fs-1/home01/jeag/")
+
+ps_nocontam <- readRDS("ps_LULU.rds")
+count_tab <- t(otu_table(ps_nocontam))
+tax_tab <- tax_table(ps_nocontam)   
+metadata <- sample_data(ps_nocontam)
+
+ps_LULU_1 <- phyloseq(otu_table(count_tab, taxa_are_rows=TRUE), 
+               sample_data(metadata), 
+               tax_table(tax_tab))
+
+
+saveRDS(ps_LULU_1, file="ps_LULU_1.rds")
+
+ps_nocontam <- readRDS("ps_LULU_1.rds")
+
+count_tab <- t(otu_table(ps_nocontam))
+tax_tab <- tax_table(ps_nocontam)   
+metadata <- sample_data(ps_nocontam)
+
+```
+
+Renaming the the taxa to something human-friendly, and copy the ASV sequences to the reference sequence slot of the phyloseq object
+
+```{r}
+# The taxa names are the actual ASV sequences, and this makes for messy displays
+# We can rename the taxa to something human-friendly, and copy the ASV sequences to the reference sequence slot of the phyloseq object
+LL.newnames <- paste0("ASV", seq(ntaxa(ps_nocontam))) # Define new names ASV1, ASV2, ...
+LL.seqs <- taxa_names(ps_nocontam) # Store sequences
+names(LL.seqs) <- LL.newnames # Make map from ASV1 to full sequence
+taxa_names(ps_nocontam) <- LL.newnames # Rename to human-friendly format
+
+# Do the names of the sequences in the phyloseq object match all those in the sequence list?
+intersect(names(LL.seqs), taxa_names(ps_nocontam))
+
+# Merge the reference seqeunces into the phyloseq object
+ps_nocontam<-merge_phyloseq(ps_nocontam, DNAStringSet(LL.seqs))
+
+# Does the newly merged phyloseq object now contain the reference sequences?
+ps_nocontam
+
+# What does one of the reference sequences look like?
+refseq(ps_nocontam)[1]
+refseq(ps_nocontam)[2]
+refseq(ps_nocontam)[22]
+# Are the taxa newly renamed to a human-friendly format?
+
+taxa_names(ps_nocontam)[1]
+taxa_names(ps_nocontam)[2:5]
+
+# Spot check metadata for a sample
+ps_nocontam@sam_data[1:10,]
+
+```
+
+Make a new phyloseq object and add a phylogenetic tree
+```{r}
+random_tree = rtree(ntaxa(ps_nocontam), rooted=TRUE, tip.label=taxa_names(ps_nocontam))
+ps_nocontam1 = merge_phyloseq(ps_nocontam, sam_data, random_tree)
+ps_nocontam1
+
+```
+
+Plotting the phylogenetic tree - not well defined
+```{r}
+plot_tree(ps_nocontam1, color="Diet", label.tips="taxa_names", ladderize="left", plot.margin=0.3)
+```
+
+Extract metadata from the phyloseq object and subset the phyloseq object to create a new phyloseq object with digesta samples only
+
+
+```{r}
+# Extract metadata from the phyloseq object
+metadata <- data.frame(sample_data(ps_nocontam1), check.names = FALSE)
+ps_nocontam2 <- subset_samples(ps_nocontam1, Sample_type == "Digesta")
+
+
+#ps_nocontam <- readRDS("ps_nocontam.rds")
+#ps_nocontam_1 <- subset_samples(ps_nocontam, Sample_type != "Positive_control")
+#ps_nocontam_1 <- subset_samples(ps_nocontam_1, Sample_type != "control")
+
+```
+
+
+Compute alpha-diversity for the digesta samples only
+```{r}
+# Compute Observed features, Peilou's Evenness and Shannon's index
+adiv_npd <- alpha(ps_nocontam2, index = c("observed", "evenness_pielou", "diversity_shannon")) %>%
+  rownames_to_column("SampleID")
+# Compute Faith's Phylogenetic Diversity
+adiv_pd <- pd(samp = otu_table(ps_nocontam2), tree = phy_tree(ps_nocontam2), include.root = F) %>%
+  select(PD) %>%
+  rownames_to_column("SampleID")
+# Combining Observed features, Peilou's Evenness, Shannon's index and Faith's Phylogenetic Diversity
+adiv1 <- inner_join(adiv_npd, adiv_pd, by = "SampleID")
+
+#Change the column names of adiv
+ colnames(adiv1) <- c("SampleID","Observed ASVs", "Pielou's evenness", 
+         "Shannon's index", "Faith's PD")
+##Join the metadata with the adiv
+adiv <- adiv1 %>%
+  inner_join(rownames_to_column(metadata, "SampleID"), by = "SampleID") %>%
+   gather(adiv, "value", "Observed ASVs":"Faith's PD") %>%
+  mutate(Diet = as.character(Diet), DN = as.character(DN), 
+         adiv = factor(adiv, levels = c("Observed ASVs", "Pielou's evenness", "Shannon's index", "Faith's PD")))
+
+```
+
+
+```{r}
+p <- ggplot(adiv, aes(x = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")), y = value)) +
+  geom_boxplot(aes(fill = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM"))), outlier.shape = NA, width = 0.5) +
+  geom_jitter(shape = 16, position = position_jitter(0.2), alpha = 0.3) +
+  facet_wrap(~adiv, nrow = 1, scales = "free_y") +
+  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.15))) +  
+  scale_fill_manual(values = brewer.pal(n = 12, name = "Paired")[c(1,2,7,8, 6, 10, 3, 5, 4, 11, 12, 9)]) +
+  labs(fill = "Diet") +
+  theme_bw(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p
+
+```
+
+
+Alpha-diversity group significance
+The statisitical difference between the diets for the four alpha diversity measurements were evaluated using kruska-walis test and the significance between diets were identified with pairwise wilcox test.
+##Flitering the adiv dataframe into each alpha diversity index
+
+```{r}
+##Filter only the dataframe for Observed ASVs 
+adiv_o <- adiv %>%
+            filter(adiv == "Observed ASVs")
+##Filter only the dataframe for Pielou's evenness 
+adiv_p <- adiv %>%
+            filter(adiv == "Pielou's evenness")
+##Filter only the dataframe for Shannon's index
+adiv_s <- adiv %>%
+            filter(adiv == "Shannon's index")
+##Filter only the dataframe for Faith's PD
+adiv_f <- adiv %>%
+            filter(adiv == "Faith's PD")
+
+```
+
+Test the diet effect on alpha diversity indices - Kruska-walis test
+
+```{r}
+##Statistics for observed ASVs
+kruskal.test(value ~ Diet, data = adiv_o)
+
+##Statistics for Pielou's evenness
+kruskal.test(value ~ Diet, data = adiv_p)
+
+##Statistics for Shannon's index
+kruskal.test(value ~ Diet, data = adiv_s)
+
+##Statistics for Faith's PD
+kruskal.test(value ~ Diet, data = adiv_f)
+
+```
+
+
+Pair-wise comparison
+The P-values for alpha diversity indices (observed ASVs, Pielou's evenness, Shannon's index and Faith's PD) were less than 0.0001. Thus, we proceed to use wilcox pairwise comparison to identify differences between diets.
+
+```{r}
+##Statistics for observed ASVs
+wilcox_o <- compare_means(value ~ Diet, adiv_o, method = "wilcox.test")
+
+##Statistics for Pielou's evenness
+wilcox_p <-compare_means(value ~ Diet, adiv_p, method = "wilcox.test")
+
+##Statistics for Shannon's index
+wilcox_s <-compare_means(value ~ Diet, adiv_s, method = "wilcox.test")
+
+##Statistics for Faith's PD
+wilcox_f <-compare_means(value ~ Diet, adiv_f, method = "wilcox.test")
+
+##Write the pairwise wilcox comparison for each alpha diversity indices into a CSV file to annotate Figure 4 using adobe illustrator on any of the editing software later
+write.csv(wilcox_o, file = "Wilcox pairwise comparison_Observed ASVs", row.names = FALSE)
+write.csv(wilcox_p, file = "Wilcox pairwise comparison_Pielou's evenness", row.names = FALSE)
+write.csv(wilcox_s, file = "Wilcox pairwise comparison_Shannon's index", row.names = FALSE)
+write.csv(wilcox_f, file = "Wilcox pairwise comparison_Faith's PD", row.names = FALSE)
+
+openxlsx::write.xlsx(wilcox_o, file = "Wilcox pairwise comparison_Observed ASVs.xlsx")
+openxlsx::write.xlsx(wilcox_p, file = "Wilcox pairwise comparison_Pielou's evenness.xlsx")
+openxlsx::write.xlsx(wilcox_s, file = "Wilcox pairwise comparison_Shannon's index.xlsx")
+openxlsx::write.xlsx(wilcox_f, file = "Wilcox pairwise comparison_Faith's PD.xlsx")
+
+```
+
+
+The script below is just to improve the quality of the figure
+
+```{r}
+# Make a list of alpha-diversity plots
+p_list <- lapply(
+  as.list(levels(adiv$adiv)),
+  function(x) 
+  {
+    # Make an inital plot
+    p <- filter(adiv, adiv == x) %>%
+      ggplot(aes(x = factor(Diet, levels = c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")), y = value)) +
+      geom_boxplot(aes(fill = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM"))), outlier.shape = NA, width = 0.5) +
+      geom_jitter(shape = 16, position = position_jitter(0.2), alpha = 0.3) +
+      facet_wrap(~adiv, nrow = 1, scales = "free_y") +
+      scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.15))) +  
+      labs(x = "") +
+      theme_cowplot() +
+      scale_fill_manual(values = brewer.pal(n = 12, name = "Paired")[c(1,2,7,8, 6, 10)]) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10),legend.position = "none") 
+      
+    # Assemble plots
+    
+    plot_grid(p, labels = "", ncol = 2, rel_widths = c(2, 1))
+  }
+)
+ 
+# Get figure legend
+legend <- get_legend(p)
+# Assemble plots
+prow <- plot_grid(plotlist = p_list, ncol = 2, align = 'v', axis = "lr", labels = "")
+
+# Add legend to the assembled plot
+
+plot_grid(prow, legend, rel_widths = c(7, 1))
+# Export figure
+ggsave("Figure 3.tiff", width = 8, height = 9,
+       units = "in", dpi = 300, compression = "lzw")
+
+ggsave("Figure 3.pdf", width = 8, height = 9,
+       units = "in", dpi = 300)
+
+```
+
+
+Save files
+
+```{r}
+saveRDS(ps_nocontam1, file="ps_nocontam1.rds")
+saveRDS(ps_nocontam2, file="ps_nocontam2.rds")
+
+```
+
+
+Read files
+```{r}
+readRDS("ps_nocontam1.rds")
+readRDS("ps_nocontam2.rds")
+
+```
+
+
+Acknowldements
+
+Modified from Li et al. (2021).
+
+Li, Y., Bruni, L., Jaramillo-Torres, A., Gajardo, K., Kortner, T.M., Krogdahl, Å., 2021. Differential response of digesta- and mucosa-associated intestinal microbiota to dietary insect meal during the seawater phase of Atlantic salmon. Animal Microbiome. 3, 8. https://doi.org/10.1186/s42523-020-00071-3.
+

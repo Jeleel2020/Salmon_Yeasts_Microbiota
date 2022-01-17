@@ -1,0 +1,1017 @@
+---
+title: "03_taxonomy analysis"
+author: "Jeleel"
+date: "11/8/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load the required package. Install ggstatsplot before running the script. If you are working with orion, this should be done with R.4.0.4 as this was recently updated for installing the package
+
+```{r}
+library(Rcpp)
+library(dada2)
+library(phyloseq)
+library(permute)
+library(lattice)
+library(vegan)
+library(ggplot2)
+library(tidyverse)
+library(ggstatsplot)
+library(dplyr)
+library(microbiome)
+library(microbiomeutilities) 
+library(knitr)
+library(RColorBrewer)
+library(DT)
+library(gt)
+library(cowplot)
+library(PerformanceAnalytics)
+library(venn)
+library(philr)
+library(MicrobeR)
+
+```
+
+Check current software/package versions
+```{r}
+getRversion()
+packageVersion("dada2")
+packageVersion("phyloseq")
+packageVersion("ggplot2")
+packageVersion("vegan")
+
+```
+
+##Read the saved rds file to start again
+```{r}
+ps_nocontam <- readRDS("ps_nocontam.rds")
+ps_nocontam_mock <- readRDS("ps_nocontam_mock.rds")
+contam.neg <- readRDS("contam_neg.rds")
+
+```
+
+##Source and load the make_taxa_barplot saved as R script
+
+```{r}
+"/net/fs-1/home01/jeag"
+setwd ("/net/fs-1/home01/jeag/")
+source("make_taxa_barplot.R")
+```
+
+##Testing out some parameters to understand the content of your ps_nocontam_mock
+```{r}
+summarize_phyloseq(ps_nocontam_mock)
+meta <- meta(ps_nocontam_mock)
+taxonomy <- tax_table(ps_nocontam_mock)
+otu.absolute <- abundances(ps_nocontam_mock)
+otu.relative <- abundances(ps_nocontam_mock, "compositional")
+reads_sample <- readcount(ps_nocontam_mock)
+# check for first 2 samples
+reads_sample[1:2]
+# Add read per sample to phyloseq object metadata.
+sample_data(ps_nocontam_mock)$reads_sample <- reads_sample
+
+# reads_sample is added to the last column in sample_data of pseq object.
+head(meta(ps_nocontam_mock)[,c("Sample_kind", "reads_sample")])
+
+```
+
+
+##Transform your ps_nocontam_mock into proportion
+
+```{r}
+ps.transform <- transform_sample_counts(ps_nocontam_mock, function(x){(x / sum(x))*100})
+df1 <- psmelt(ps.transform)
+
+# write the transformed as.data.frame and filter out those where ABundance == 0
+df2 <- df1 %>% 
+  as.data.frame() %>% 
+  filter(Abundance > 0)
+
+```
+
+##filter each mock into separate dataframe
+```{r}
+mock_1 <- df2 %>%
+  filter(Sample == "M48")
+
+mock_2 <-df2 %>%
+  filter(Sample == "S48")
+
+```
+
+##Select Abundance, Diet, Kingdom to Species row from the filtered mock dataframe. Also, read the expected mock file from the composition of the bacteria supplied by ZymoBIOMICS
+
+```{r}
+mock_1a <- mock_1 %>%
+  select( Abundance, Diet, Kingdom:Species) %>%
+cbind(type = "Observed")
+
+
+mock_2a <- mock_2 %>%
+  select( Abundance, Diet, Kingdom:Species)%>%
+cbind(type = "Observed")
+
+##Read the expected composition of the mock
+mock_exp <- read.csv("/net/fs-1/home01/jeag/Mock_expected.csv", comment.char = " ") %>%  
+  as.data.frame()
+
+##merged the three mock dataframes  
+mock_merged <- bind_rows(mock_1a, mock_2a, mock_exp)
+mock_merged[1:5,]
+openxlsx::write.xlsx(mock_merged, file = "mock_merged_percent1.xlsx")
+```
+
+##Make barplot
+
+use italic font for genus/species names in the legend
+```{r}
+labs_mock <- c(
+  expression(paste(italic("Bacillus subtilis"), "(G+) / ", italic("Bacillus"))), 
+  expression(paste(italic("Enterococcus faecalis"), "(G+) / ", italic("Enterococcus"))),
+  expression(paste(italic("Escherichia coli"), "(G-) / ", italic("Escherichia-Shigella"))),
+  expression(paste(italic("Lactobacillus fermentum"), "(G+) / ", italic("Lactobacillus"))),
+  expression(paste(italic("Listeria monocytogenes"), "(G+) / ", italic("Listeria"))),
+  expression(paste(italic("Pseudomonas aeruginosa"), "(G-) / ", italic("Pseudomonas"))), 
+  expression(paste(italic("Salmonella enterica"), "(G-) / ", italic("Salmonella"))), 
+  expression(paste(italic("Staphylococcus aureus"), "(G+) / ", italic("Staphylococcus"))))
+
+```
+
+
+##make barplot for the observed and expected mock.
+
+```{r}
+mock_plot <- ggplot(mock_merged, aes(fill=Genus, y=Abundance, x=Diet)) + 
+            geom_bar(aes(fill = Genus), stat="identity", width = 0.5) +
+            labs(x = "", y = "Relative abundance (%)", fill = "Taxa (expected (Gram stain) / observed)") +
+            scale_fill_manual(values = brewer.pal(8, "Paired"), labels = labs_mock) +
+            theme_minimal() + 
+            theme(panel.grid.major.y = element_line(size = 0.5, linetype = 'dashed', colour = "black"),
+            legend.justification = "top", # move legend to top right position 
+            legend.text.align = 0) # align legend text to left
+mock_plot 
+
+```
+
+
+```{r}
+plot_grid(mock_plot, labels = "AUTO", ncol = 1)  
+# Export the plot as a tiff file
+ggsave("Figure S4.tiff", width = 6, height = 4, 
+       units = "in", dpi = 300, compression = "lzw")
+# Export the plot as a pdf file
+ggsave("Figure S4.pdf", width = 6, height = 4, 
+       units = "in", dpi = 300)
+
+```
+
+##Import and tidy saved contaminant csv file from pre-processing.
+
+```{r}
+neg <- read.csv("/net/fs-1/home01/jeag/sample_contaminats1", comment.char = " ") %>%  
+  as.data.frame() %>% 
+  filter(Abundance > 0)
+
+```
+
+```{r}
+##Filter paper blank 1
+neg1 <- neg %>%
+  filter(Sample == "M64") %>%
+  cbind(type = "FP1") %>%
+   mutate_at(vars(Abundance), funs(./sum(.)*100))
+
+##Filter paper blank 2
+neg2 <- neg %>%
+  filter(Sample == "S71") %>%
+   cbind(type = "FP2")%>%
+   mutate_at(vars(Abundance), funs(./sum(.)*100))
+
+##Negative control (i.e. extraction control) blank 1
+neg3 <- neg %>%
+  filter(Sample == "M65") %>%
+   cbind(type = "NC1")%>%
+   mutate_at(vars(Abundance), funs(./sum(.)*100))
+
+##Negative control (i.e. extraction control) blank 2
+neg4 <- neg %>%
+  filter(Sample == "S72") %>%
+   cbind(type = "NC2")%>%
+   mutate_at(vars(Abundance), funs(./sum(.)*100)) 
+
+##Merged the four control into one dataframe for plotting
+neg_merged <- bind_rows(neg1, neg2, neg3, neg4)
+openxlsx::write.xlsx(neg_merged, file = "neg_merged_percent.xlsx")
+
+```
+
+##Make plots for the samples, load your non-contam (after LULU curation) phyloseq object
+
+```{r}
+ps_nocontam <- readRDS("ps_LULU.rds")
+taxa_are_rows(otu_table(ps_nocontam))
+taxa_are_rows(ps_nocontam)
+
+
+```
+
+##extract feature table, taxonomy and metadata from the phyloseq object. Check if your feature table (count_tab) are sample ID as rows. check with taxa_are_rows(phyloseq object). if the answer is FALSE, transpose it as done below. otherwise, do not.
+
+```{r}
+# Extract feature table, taxonomy and metadata from the phyloseq object
+count_tab <- as.data.frame(otu_table(ps_nocontam)) 
+tax_tab <- tax_table(ps_nocontam) %>% as("matrix") %>% as.data.frame()  
+metadata <- data.frame(sample_data(ps_nocontam), check.names = FALSE)
+
+```
+
+Overview of taxonomy assignments
+First of all, let's look at the coverage of taxonomy assignments at different levels.
+
+```{r}
+library(tidyr)
+tax_tab %>%
+  gather("Rank", "Name", rank_names(ps_nocontam)) %>%
+  group_by(Rank) %>%
+  # Empty taxonomic ranks may be na or strings containing "uncultured" or "Ambiguous_taxa"
+  summarize(ASVs_classified = sum(!is.na(Name) & !grepl("uncultured|Ambiguous|metagenome", Name))) %>%
+  mutate(Frac_classified = ASVs_classified / ntaxa(ps_nocontam),
+         Frac_classified = ifelse(Frac_classified == 1, "100", round(Frac_classified * 100, 1)),
+         Frac_classified = paste(Frac_classified, "%"),
+         Rank = factor(Rank, rank_names(ps_nocontam))) %>%
+  arrange(Rank) %>%
+  datatable(options = list(columnDefs = list(list(className = 'dt-left', targets = c(0:3)))))
+
+##We observed that the 76.4% of ASVs were assigned at the genus level whereas only 13.5% of ASVs got a species-level annotation.
+```
+
+##Summarize and prune taxa
+
+```{r}
+tab_phy <- Summarize.Taxa(count_tab, tax_tab)$Phylum %>%
+  # the following 3 lines of codes prune the taxonomy to contain phylum names only
+  rownames_to_column("tax") %>%
+  mutate(tax = gsub("Bacteria;", "", tax)) %>%
+  column_to_rownames("tax")
+
+dim(count_tab)
+dim(tax_tab)
+##row.names(count_tab)
+
+##openxlsx::write.xlsx(tab_phy, file = "phylum.xlsx")
+
+##select only digesta sample by removing the mock, feed , the filter paper, negative control and water samples
+tab_phy1 <- tab_phy %>%
+            select(-c(M48, S48, M55:M59,M60:M65,  S56:S59, S60:S69, S70:S72))
+
+##openxlsx::write.xlsx(tab_phy1, file = "taxatable_phy.xlsx")
+
+##Select only the feed samples
+tab_phy2 <- tab_phy %>%
+            select(c(M55:M59,M60,  S56:S59, S60:S67))
+##openxlsx::write.xlsx(tab_phy2, file = "taxatable_phy3.xlsx")
+
+##Select only water samples
+tab_phy3 <- tab_phy %>%
+            select(c(M61:M63,S68:S69,S70))
+##openxlsx::write.xlsx(tab_phy3, file = "taxatable_phy4.xlsx")
+
+tab_phy3 <- tab_phy3[-c(17),]
+
+
+
+
+
+##openxlsx::write.xlsx(tab_phy1, file = "phylum_digesta.xlsx")
+##openxlsx::write.xlsx(tab_phy2, file = "phylum_feed.xlsx")
+##openxlsx::write.xlsx(tab_phy3, file = "phylum_water.xlsx")
+
+tab_phya <- tab_phy %>% rownames_to_column()
+##openxlsx::write.xlsx(tab_phya, file = "phylum_name.xlsx")
+
+tab_phy1a <- tab_phy1 %>% rownames_to_column()
+##openxlsx::write.xlsx(tab_phy1a, file = "phylum_digesta_name.xlsx")
+tab_phy2a <- tab_phy2 %>% rownames_to_column()
+##openxlsx::write.xlsx(tab_phy2a, file = "phylum_feed_name.xlsx")
+tab_phy3a <- tab_phy3 %>% rownames_to_column()
+##openxlsx::write.xlsx(tab_phy3a, file = "phylum_water_name.xlsx")
+
+
+
+```
+
+Genus-level
+##Collapse feature table at genus level
+
+```{r}
+tab_gen <- Summarize.Taxa(count_tab, tax_tab)$Genus %>%
+  rownames_to_column("tax") %>%
+  # the following 6 lines of codes produce genus-level taxonomy for each feature
+  separate(tax, sep = ";", c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus")) %>% 
+  mutate(Class = ifelse(Class == "NA"|grepl("uncultured|Ambiguous|metagenome", Class), Phylum, Class), 
+         Order = ifelse(Order == "NA"|grepl("uncultured|Ambiguous|metagenome", Order), Class, Order),
+         Family = ifelse(Family == "NA"|grepl("uncultured|Ambiguous|metagenome", Family), Order, Family),
+         Genus = ifelse(Genus == "NA"|grepl("uncultured|Ambiguous|metagenome", Genus), Family, Genus)) %>%
+  select(-(Kingdom:Family)) %>%
+  # the following 4 lines of codes collapse features by taxonomy
+  gather("SampleID", "counts", -Genus) %>%
+  group_by(SampleID, Genus) %>%
+  summarize(counts_colsum = sum(counts)) %>%
+  spread("SampleID", "counts_colsum") %>%
+  column_to_rownames("Genus")
+
+##Select only the digesta samples
+tab_gen1 <- tab_gen %>%
+            select(-c(M48, S48, M55:M59,M60:M65,  S56:S59, S60:S69, S70:S72))
+##Select only the feed samples
+tab_gen2 <- tab_gen %>%
+            select(c(M55:M59,M60,  S56:S59, S60:S67))
+
+##Select only water samples
+tab_gen3 <- tab_gen %>%
+            select(c(M61:M63,S68:S69,S70))
+
+openxlsx::write.xlsx(tab_gen2, file = "taxatable_gen.xlsx")
+openxlsx::write.xlsx(tab_gen3, file = "taxatable_gen1.xlsx")
+
+openxlsx::write.xlsx(tab_gen, file = "genus.xlsx")
+openxlsx::write.xlsx(tab_gen1, file = "genus_digesta.xlsx")
+openxlsx::write.xlsx(tab_gen2, file = "genus_feed2.xlsx")
+openxlsx::write.xlsx(tab_gen3, file = "genus_water.xlsx")
+
+
+tab_gena <- tab_gen %>% rownames_to_column()
+openxlsx::write.xlsx(tab_gena, file = "genus_name2.xlsx")
+tab_gen1a <- tab_gen1 %>% rownames_to_column()
+openxlsx::write.xlsx(tab_gen1a, file = "genus_digesta_name2.xlsx")
+tab_gen2a <- tab_gen2 %>% rownames_to_column()
+openxlsx::write.xlsx(tab_gen2a, file = "genus_feed_name2.xlsx")
+tab_gen3a <- tab_gen3 %>% rownames_to_column()
+openxlsx::write.xlsx(tab_gen3a, file = "genus_water_name2.xlsx")
+
+```
+
+
+
+Define colors
+
+```{r}
+taxa <- unique(c(row.names(tab_phy), row.names(tab_gen)))
+colors <- randomcoloR::distinctColorPalette(length(taxa))
+names(colors) <- taxa
+colors[["Others"]] <- "#d9d9d9"
+
+
+```
+
+##Make taxa barplot at phylum level
+```{r}
+# Plot taxa on individual basis for digesta
+metadata1 <- subset (metadata, Sample_type == "Digesta")
+metadata1$Diet <- factor(metadata1$Diet, levels =  c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM"))
+
+p_phy_ind <- make_taxa_barplot(table = tab_phy1, 
+                               metadata = metadata1, 
+                               group_by = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")), 
+                               ntaxa = 10,
+                               nrow = 1,
+                               plot_mean = FALSE, 
+                               cluster_sample = FALSE,
+                               sample_label = fish_number,
+                               italize_taxa_name = TRUE,
+                               colors = colors)
+
+p_phy_ind <- p_phy_ind + labs(x = "Fish ID")                                
+# Plot taxa using group means for digesta
+p_phy_mean <- make_taxa_barplot(table = tab_phy1, 
+                                metadata = metadata1, 
+                                group_by = Diet,
+                                ntaxa = 10,
+                                nrow = 1,
+                                plot_mean = TRUE, 
+                                cluster_sample = FALSE,
+                                #sample_label = FishID,
+                                italize_taxa_name = TRUE,
+                               colors = colors)
+
+                                
+p_phy_mean <- p_phy_mean + labs(x = "", y = "")
+
+```
+
+##Make taxa barplot for only feed
+```{r}
+# Plot taxa on individual basis for feed
+metadata2 <- subset (metadata, Sample_type == "Feed")
+metadata2$Diet <- factor(metadata2$Diet, levels =  c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM"))
+p_phy_ind1 <- make_taxa_barplot(table = tab_phy2, 
+                               metadata = metadata2, 
+                               group_by = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")), 
+                               ntaxa = 10,
+                               nrow = 1,
+                               plot_mean = FALSE, 
+                               cluster_sample = FALSE,
+                               sample_label = fish_number,
+                               italize_taxa_name = TRUE,
+                               colors = colors)
+p_phy_ind1 <- p_phy_ind1 + labs(x = "Feeds")
+# Plot taxa using group means for feed
+p_phy_mean1 <- make_taxa_barplot(table = tab_phy2, 
+                                metadata = metadata2, 
+                                group_by = Diet, 
+                                ntaxa = 10,
+                                nrow = 1,
+                                plot_mean = TRUE, 
+                                cluster_sample = FALSE,
+                                #sample_label = FishID,
+                                italize_taxa_name = TRUE,
+                               colors = colors)
+                                
+p_phy_mean1 <- p_phy_mean1 + labs(x = "", y = "")
+```
+
+
+##Make taxa barplot at phylum level for water samples
+```{r}
+
+# Plot taxa on individual basis for water
+metadata3 <- subset (metadata, Sample_type == "water")
+
+p_phy_ind2 <- make_taxa_barplot(table = tab_phy3, 
+                               metadata = metadata3, 
+                               group_by = Diet, 
+                               ntaxa = 10,
+                               nrow = 1,
+                               plot_mean = FALSE, 
+                               cluster_sample = FALSE,
+                               sample_label = fish_number,
+                               italize_taxa_name = TRUE,
+                               colors = colors)
+p_phy_ind2 <- p_phy_ind2 + labs(x = "Water")
+# Plot taxa using group means for digesta
+p_phy_mean2 <- make_taxa_barplot(table = tab_phy3, 
+                                metadata = metadata3, 
+                                group_by = Diet, 
+                                ntaxa = 10,
+                                nrow = 1,
+                                plot_mean = TRUE, 
+                                cluster_sample = FALSE,
+                                #sample_label = FishID,
+                                italize_taxa_name = TRUE,
+                               colors = colors)
+                                
+p_phy_mean2 <- p_phy_mean2 + labs(x = "", y = "")
+```
+
+
+
+##Make taxa barplot showing top 15 genera in the digesta samples
+```{r}
+# Plot taxa on individual basis
+metadata1 <- subset (metadata, Sample_type == "Digesta")
+metadata1$Diet <- factor(metadata1$Diet, levels =  c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM"))
+p_gen_ind <- make_taxa_barplot(table = tab_gen1, 
+                               metadata = metadata1, 
+                               group_by = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")), 
+                               ntaxa = 15,
+                               nrow = 1,
+                               plot_mean = FALSE, 
+                               cluster_sample = FALSE,
+                               sample_label = Tank,
+                               italize_taxa_name = TRUE,
+                               colors = colors)
+p_gen_ind <- p_gen_ind + labs(x = "Fish ID") 
+# Plot taxa using group means
+p_gen_mean <- make_taxa_barplot(table = tab_gen1, 
+                                metadata = metadata1, 
+                                group_by = Diet, 
+                                ntaxa = 15,
+                                nrow = 1,
+                                plot_mean = TRUE, 
+                                cluster_sample = TRUE,
+                                sample_label = Diet,
+                                italize_taxa_name = TRUE,
+                               colors = colors)
+                                
+p_gen_mean <- p_gen_mean + labs(x = "", y = "")
+```
+
+##Make taxa barplot showing top 15 genera in the feed samples
+```{r}
+# Plot taxa on individual basis
+metadata2 <- subset (metadata, Sample_type == "Feed")
+metadata2$Diet <- factor(metadata2$Diet, levels =  c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM"))
+
+p_gen_ind1 <- make_taxa_barplot(table = tab_gen2, 
+                               metadata = metadata2, 
+                               group_by = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")), 
+                               ntaxa = 15,
+                               nrow = 1,
+                               plot_mean = FALSE, 
+                               cluster_sample = FALSE,
+                               sample_label = fish_number,
+                               italize_taxa_name = TRUE,
+                               colors = colors)
+p_gen_ind1 <- p_gen_ind1 + labs(x = "Feeds") 
+# Plot taxa using group means
+p_gen_mean1 <- make_taxa_barplot(table = tab_gen2, 
+                                metadata = metadata2, 
+                                group_by = Diet, 
+                                ntaxa = 15,
+                                nrow = 1,
+                                plot_mean = TRUE, 
+                                cluster_sample = TRUE,
+                                ##sample_label = Diet,
+                                italize_taxa_name = TRUE,
+                               colors = colors)
+                                
+p_gen_mean1 <- p_gen_mean1 + labs(x = "", y = "")
+```
+
+##Make taxa barplot showing top 15 genera in the water samples
+```{r}
+# Plot taxa on individual basis
+metadata3 <- subset (metadata, Sample_type == "water")
+p_gen_ind2 <- make_taxa_barplot(table = tab_gen3, 
+                               metadata = metadata3, 
+                               group_by = Diet, 
+                               ntaxa = 15,
+                               nrow = 1,
+                               plot_mean = FALSE, 
+                               cluster_sample = FALSE,
+                               sample_label = fish_number,
+                               italize_taxa_name = TRUE,
+                               colors = colors)
+p_gen_ind2 <- p_gen_ind2 + labs(x = "Water") 
+# Plot taxa using group means
+p_gen_mean2 <- make_taxa_barplot(table = tab_gen3, 
+                                metadata = metadata3, 
+                                group_by = Diet, 
+                                ntaxa = 15,
+                                nrow = 1,
+                                plot_mean = TRUE, 
+                                cluster_sample = TRUE,
+                                ##sample_label = Diet,
+                                italize_taxa_name = TRUE,
+                               colors = colors)
+                                
+p_gen_mean2 <- p_gen_mean2 + labs(x = "", y = "")
+```
+
+
+## Assemble plots for digesta
+```{r, fig.width=14, fig.height=10}
+plot_grid(p_phy_ind + theme(legend.position = "none", axis.text.x = element_text(size = 5, angle = 45)), 
+          p_phy_mean + theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10), 
+                             plot.margin = margin(l = -0.8, unit = "cm"),
+                             legend.box.margin=margin(l = -20, r = 3), legend.text = element_text(size = 5),legend.margin = margin(5,5,5,5)),
+          p_gen_ind + theme(legend.position = "none", axis.text.x = element_text(size = 5, angle = 45)), 
+          p_gen_mean + theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+                             plot.margin = margin(l = -0.8, unit = "cm"), 
+                             legend.box.margin=margin(l = -20, r = 3), legend.text = element_text(size = 5),     legend.margin = margin(5,5,5,5)),
+          labels = c("A", "", "B", ""), ncol = 2, align = 'hv', axis = "tb", 
+          rel_widths = c(3, 1, 3, 1)) 
+# Export the plot
+ggsave(("Figure 1.tiff"), width = 14, height = 10, 
+       units = "in", dpi = 300, compression = "lzw")
+# Export the plot as a pdf file
+ggsave("Figure 1.pdf", width = 14, height = 10, 
+       units = "in", dpi = 300)
+```
+
+## Assemble plots for feed 
+```{r, fig.width=14, fig.height=10}
+plot_grid(p_phy_ind1 + theme(legend.position = "none"), 
+          p_phy_mean1 + theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+                             plot.margin = margin(l = -0.8, unit = "cm"),
+                             legend.box.margin=margin(l = -15, r = 3)),
+          p_gen_ind1 + theme(legend.position = "none"), 
+          p_gen_mean1 + theme(axis.text.x = element_text(angle = 45, hjust = 1),
+                             plot.margin = margin(l = -0.8, unit = "cm"), 
+                             legend.box.margin=margin(l = -15, r = 3), legend.text = element_text(size = 5)),
+          labels = c("A", "", "B", ""), ncol = 2, align = 'hv', axis = "tb", 
+          rel_widths = c(2, 1, 2, 1)) 
+
+# Export the plot
+ggsave(("Figure S5.tiff"), width = 14, height = 10, 
+       units = "in", dpi = 300, compression = "lzw")
+# Export the plot as a pdf file
+ggsave("Figure S5.pdf", width = 14, height = 10, 
+       units = "in", dpi = 300)
+
+```
+
+## Assemble plots for water 
+```{r, fig.width=14, fig.height=10}
+plot_grid(p_phy_ind2 + theme(legend.position = "none"), 
+          p_phy_mean2 + theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+                             plot.margin = margin(l = -0.8, unit = "cm"),
+                             legend.box.margin=margin(l = -20, r = 3)),
+          p_gen_ind2 + theme(legend.position = "none"), 
+          p_gen_mean2 + theme(axis.text.x = element_text(angle = 45, hjust = 1),
+                             plot.margin = margin(l = -0.8, unit = "cm"), 
+                             legend.box.margin=margin(l = -20, r = 3)),
+          labels = c("A", "", "B", ""), ncol = 2, align = 'hv', axis = "tb", 
+          rel_widths = c(1, 1, 1, 1)) 
+# Export the plot
+ggsave(("Figure S6.tiff"), width = 14, height = 10, 
+       units = "in", dpi = 300, compression = "lzw")
+# Export the plot as a pdf file
+ggsave("Figure S6.pdf", width = 14, height = 10, 
+       units = "in", dpi = 300)
+
+```
+
+# Core microbiome 
+Calculate feature prevalence
+```{r}
+# Compute feature prevalence
+prev_fm <- subset_samples(ps_nocontam, Diet == "FM") %>% prevalence() 
+prev_sbm <- subset_samples(ps_nocontam, Diet == "SBM") %>% prevalence() 
+prev_icj <- subset_samples(ps_nocontam, Diet == "ICJ") %>% prevalence() 
+prev_acj <- subset_samples(ps_nocontam, Diet == "ACJ") %>% prevalence()
+prev_iwa <- subset_samples(ps_nocontam, Diet == "IWA") %>% prevalence()
+prev_awa <- subset_samples(ps_nocontam, Diet == "AWA") %>% prevalence()
+```
+
+##Get core features that are present in at least 80% samples under the different diets
+```{r}
+core_taxa <- cbind.data.frame(prev_fm, prev_sbm, prev_icj, prev_acj, prev_iwa, prev_awa) %>%
+  rownames_to_column("featureID") %>%
+  # get core features based on 80% prevalence threshold
+  filter(prev_fm >= 0.8|prev_sbm >= 0.8|prev_icj >= 0.8|prev_acj >= 0.8|prev_iwa >= 0.8|prev_awa >= 0.8)
+```
+
+
+##Add taxonomy to core features
+```{r}
+core_taxa_tab <- rownames_to_column(tax_tab, "featureID") %>%
+  inner_join(core_taxa, by = "featureID") %>%
+  rename("FM" = prev_fm, "SBM" = prev_sbm, "ICJ" = prev_icj, "ACJ" = prev_acj, "IWA" = prev_iwa, "AWA" = prev_awa) %>%
+  mutate(prev_all = rowSums(.[9:14])) %>%
+  arrange(desc(prev_all)) %>%
+  mutate_if(is.numeric, ~ifelse(.x == 1, 100, round(.x * 100, 1))) %>%
+  mutate_if(is.numeric, ~paste0(.x, "%")) %>%
+  mutate_if(is.factor, ~gsub("*.__|uncultured.*|Ambiguous.*|metagenome", "", .x)) %>%
+  map_df(~replace_na(.x, "")) %>%
+  select(-featureID, -Kingdom, -prev_all) 
+
+core_taxa_tab %>%
+  datatable(options = list(columnDefs = list(list(className = 'dt-left', targets = c(0:7)))))
+```
+##Here, we explore the core taxa as table possibly for use as supplementary material in the manuscript
+```{r, include=FALSE}
+# Export core taxa table as Table S2
+core_taxa_tab %>%
+  gt() %>%
+  tab_header(title = "Table S2. The prevalence of core ASVs in different sample types.") %>%
+  tab_spanner(label = "Taxonomy", columns = 1:8) %>%
+  tab_spanner(label = "Prevalence", columns = 9:ncol(core_taxa_tab)) %>%
+  cols_align(align = "center") %>%
+  tab_source_note("The core ASVs were computed using a prevalence threshold at 80%.") %>%
+  tab_source_note("Abbreviations: FM, FM diet; SBM, SBM meal diet; 
+                  ICJ, ICJ diet; ACJ, ACJ diet; IWA, IWA diet; AWA, AWA diet.") %>%
+  # the top/bottom border color can't be modified
+  tab_style(style = list(cell_text(weight = "bold", size = 14), cell_borders(sides = "top", color = "white")),
+            locations = cells_title(groups = "title")) %>%
+  tab_options(table.font.size = 12, column_labels.font.size = 12, source_notes.font.size = 12) %>%
+  gtsave("Table S4.html")
+openxlsx::write.xlsx(core_taxa_tab, file = "Table S4.xlsx")
+```
+
+
+##Convert feature prevalence to boolean values for plotting Venn's diagram
+```{r}
+##Venn for FM diet, SBM diet, ICJ diet and ACJ diet
+core_taxa_venn <- core_taxa %>%
+                  select(featureID:prev_acj) %>%
+  rename("FM" = prev_fm, "SBM" = prev_sbm, "ICJ" = prev_icj, "ACJ" = prev_acj) %>%
+  mutate_if(is.numeric, ~if_else(.x >= 0.8, 1, 0))
+```
+
+##Make Venn diagram
+```{r }
+venn <- venn(core_taxa_venn[2:5], ellipse = TRUE, zcolor = brewer.pal(n = 12, name = "Paired")[c(1,3,5,9)], 
+     ilcs = 1.2, sncs = 1, box = FALSE)
+```
+
+##Convert feature prevalence to boolean values for plotting Venn's diagram
+```{r}
+##Venn for FM diet, SBM diet, IWA diet and AWA diet
+core_taxa_venn1 <- core_taxa %>%
+                  select(featureID, prev_fm, prev_sbm, prev_iwa, prev_awa) %>%
+  rename("FM" = prev_fm, "SBM" = prev_sbm, "IWA" = prev_iwa, "AWA" = prev_awa) %>%
+  mutate_if(is.numeric, ~if_else(.x >= 0.8, 1, 0))
+```
+
+##Make Venn diagram
+```{r }
+venn1 <- venn(core_taxa_venn1[2:5], ellipse = TRUE, zcolor = brewer.pal(n = 12, name = "Paired")[c(1,3,7,8)],
+     ilcs = 1.2, sncs = 1, box = FALSE)
+```
+
+##Export the venn as tiff. The venn are exported individually here, still have to laern how to combine them as grid.
+##Venn1
+```{r, include=FALSE}
+# Export the plot
+tiff("Figure S8a.tiff", compression = "lzw", units = "in", res = 300, height = 6, width = 6)
+venn(core_taxa_venn[2:5], ellipse = TRUE, zcolor = brewer.pal(n = 12, name = "Paired")[c(1,2,7,8)], 
+     ilcs = 1.2, sncs = 1, box = FALSE)
+dev.off()
+```
+
+##Venn2
+```{r}
+# Export the plot
+tiff("Figure S8b.tiff", compression = "lzw", units = "in", res = 300, height = 6, width = 6)
+venn(core_taxa_venn1[2:5], ellipse = TRUE, zcolor = brewer.pal(n = 12, name = "Paired")[c(1,2,7,8)],
+     ilcs = 1.2, sncs = 1, box = FALSE)
+dev.off()
+```
+
+
+Microbial overlap
+
+Number of ASVs shared
+
+Compute ASV prevalence
+
+```{r}
+ps_nocontam <- readRDS("ps_LULU.rds")
+ps_nocontam_1 <- subset_samples(ps_nocontam, Sample_type != "Positive_control")
+ps_nocontam_1 <- subset_samples(ps_nocontam_1, Sample_type != "control")
+
+mtd <- data.frame(sample_data(ps_nocontam_1), check.names = FALSE)
+
+ps_tss_1 <- transform_sample_counts(ps_nocontam_1, function(x){x / sum(x)})
+
+# total sum scaling
+
+library(ggplot2)
+#count_tab <- as.data.frame(t(otu_table(ps_tss_1)))
+# compute OTU prevalence
+prvl <- list()
+for (i in c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM", "Water")) {
+    prvl[[i]] <- subset_samples(ps_tss_1, Sample_name.1 == i) %>%
+      prevalence(detection = 0.0005, count = TRUE, include.lowest = TRUE)
+}
+for (i in c("FeedFM", "FeedSBM", "FeedICJ", "FeedACJ", "FeedIWA", "FeedAWA")) {
+    prvl[[i]] <- subset_samples(ps_tss_1, Sample_name.1 == i) %>%
+      prevalence(detection = 0.0005, count = TRUE, include.lowest = TRUE)
+}
+
+```
+
+Compute ASV overlap
+
+```{r}
+ovrl <- bind_cols(prvl) %>%
+  pivot_longer("FM":"SBM", 
+               names_to = "Sample", 
+               values_to = "Gut") %>%
+  # compute OTU overlap between water/feed and intestinal samples
+  mutate(
+    WaterOverlap = case_when(
+      Water >  0 & Gut >  0 ~ "Shared",
+      Water >  0 & Gut == 0 ~ "Unique to water",
+      Water == 0 & Gut >  0 ~ "Unique to gut",
+      TRUE ~ "Absent"),
+    FeedOverlapFM = case_when(
+      FeedFM > 0 & Gut >  0 ~ "Shared",
+      FeedFM > 0 & Gut == 0 ~ "Unique to feed",
+      FeedFM == 0 & Gut >  0 ~ "Unique to gut",
+      TRUE ~ "Absent"),
+    FeedOverlapICJ = case_when(
+      FeedICJ > 0 & Gut >  0 ~ "Shared",
+      FeedICJ > 0 & Gut == 0 ~ "Unique to feed",
+      FeedICJ == 0 & Gut >  0 ~ "Unique to gut",
+      TRUE ~ "Absent"),
+    FeedOverlapACJ = case_when(
+      FeedACJ > 0 & Gut >  0 ~ "Shared",
+      FeedACJ > 0 & Gut == 0 ~ "Unique to feed",
+      FeedACJ == 0 & Gut >  0 ~ "Unique to gut",
+      TRUE ~ "Absent"),
+    FeedOverlapIWA = case_when(
+      FeedIWA > 0 & Gut >  0 ~ "Shared",
+      FeedIWA > 0 & Gut == 0 ~ "Unique to feed",
+      FeedIWA == 0 & Gut >  0 ~ "Unique to gut",
+      TRUE ~ "Absent"),
+    FeedOverlapAWA = case_when(
+      FeedAWA > 0 & Gut >  0 ~ "Shared",
+      FeedAWA > 0 & Gut == 0 ~ "Unique to feed",
+      FeedAWA == 0 & Gut >  0 ~ "Unique to gut",
+      TRUE ~ "Absent"),
+    FeedOverlapSBM = case_when(
+      FeedSBM > 0 & Gut >  0 ~ "Shared",
+      FeedSBM > 0 & Gut == 0 ~ "Unique to feed",
+      FeedSBM == 0 & Gut >  0 ~ "Unique to gut",
+      TRUE ~ "Absent")) %>%
+  pivot_longer(WaterOverlap:FeedOverlapSBM, 
+               names_to = "OverlapType", 
+               values_to = "Category") %>%
+  count(OverlapType, Sample, Category) %>%
+  mutate(
+    Category = factor(
+      Category, 
+      levels = c("Unique to water", "Unique to feed", 
+                 "Shared", "Unique to gut", "Absent")),
+    #Diet = ifelse(grepl("FM", Sample), "FM", "ICJ", "ACJ", "IWA", "AWA", "SBM"),
+    Diet = factor(Sample, levels = c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")))
+
+```
+
+Plotting
+Plot microbial overlap between feed and intestinal samples.
+
+```{r}
+ovrl_bar_feed <- ovrl %>%
+  filter(OverlapType == "FeedOverlapFM" & Diet == "FM" |
+         OverlapType == "FeedOverlapICJ"  & Diet == "ICJ" | OverlapType == "FeedOverlapACJ"  & Diet == "ACJ"| OverlapType == "FeedOverlapIWA"  & Diet == "IWA" | OverlapType == "FeedOverlapAWA"  & Diet == "AWA"| OverlapType == "FeedOverlapSBM"  & Diet == "SBM") %>%
+  filter(Category != "Absent") %>%
+  ggplot(aes(x = Sample, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM"), y = n, fill = Category, label = n)) +
+  geom_bar(stat = "identity") +
+  geom_text(position = position_stack(vjust = 0.5), color = "white", size = 2.5) +
+  labs(x = "", y = "Number of ASVs", size = 8) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) + 
+  scale_fill_manual(values = c("#B2DF8A", "grey50", "#33A02C")) +
+  #facet_nested(~ Diet + Site, scales = "free_x", nest_line = TRUE) +
+  scale_x_discrete(limit=c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")) +
+  theme_bw() +
+  theme(axis.text.x = element_text (size = 6),
+        strip.background = element_blank(),
+        legend.title = element_blank(),
+        legend.margin = margin(0, 0, 0, 0),
+        legend.box.margin = margin(0, 0, 0, -5))  
+
+```
+
+
+Plot microbial overlap between water and intestinal samples.
+
+```{r}
+ovrl_bar_water <- ovrl %>% 
+  filter(OverlapType == "WaterOverlap", 
+         Category != "Absent") %>%
+  ggplot(aes(x = Sample, y = n, fill = Category, label = n)) +
+  geom_bar(stat = "identity") +
+  geom_text(position = position_stack(vjust = 0.5), color = "white", size = 2.5) +
+  labs(x = "", y = "Number of ASVs", size = 8) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) + 
+  scale_fill_manual(values = c("#A6CEE3", "grey50", "#1F78B4")) +
+  #facet_nested(~ Diet + Site, scales = "free_x", nest_line = TRUE) +
+  scale_x_discrete(limit=c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")) +
+  theme_bw() +
+  theme(axis.text.x = element_text (size = 6),
+        strip.background = element_blank(),
+        legend.title = element_blank(),
+        legend.margin = margin(0, 0, 0, 0),
+        legend.box.margin = margin(0, 0, 0, -5)) 
+
+```
+
+
+Assemble plots
+
+```{r}
+ovrl_bar_feed + ovrl_bar_water  
+```
+
+Abundance of ASVs shared
+
+Compute shared ASV abundance
+
+Compute the abundance of shared ASVs between feed and intestinal samples.
+
+```{r}
+shared_feed <- map(c("FeedFM", "FeedICJ", "FeedACJ", "FeedIWA", "FeedAWA", "FeedSBM"), function(x) {
+  prune_taxa(names(which(prvl[[x]] > 0)), ps_tss_1) %>% sample_sums()
+  }
+)
+names(shared_feed) <- c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")
+  
+# combine with metadata
+shared_feed <- map(seq_along(shared_feed), function(x){
+  data.frame(Abundance = shared_feed[[x]]) %>%
+  rownames_to_column("Sample_name") %>%
+  inner_join(rownames_to_column(mtd, "Sample_name"), by = "Sample_name") %>%
+  filter(Diet == names(shared_feed)[x] & !Sample_type %in% c("Feed", "Water")) %>%
+  #mutate(Segment = ifelse(Segment == "PI", "PIM", "DIM"),
+         #Segment = factor(Segment, levels = c("PIM", "DIM"))) %>%
+  mutate(Abundance = round(100 * Abundance, 1))}) %>%
+  bind_rows()
+
+```
+
+
+Compute the abundance of shared OTUs between water and intestinal samples.
+
+```{r}
+shared_water <- prune_taxa(names(which(prvl[["Water"]] > 0)), ps_tss_1) %>% 
+  sample_sums()
+# combine with metadata
+shared_water <- data.frame(Abundance = shared_water) %>%
+  rownames_to_column("Sample_name") %>%
+  inner_join(rownames_to_column(mtd, "Sample_name"), by = "Sample_name") %>%
+  filter(!Sample_type %in% c("Feed", "Water")) %>%
+  #mutate(Segment = ifelse(Segment == "PI", "PIM", "DIM"),
+         #Segment = factor(Segment, levels = c("PIM", "DIM"))) %>%
+  mutate(Abundance = round(100 * Abundance, 1))
+
+```
+
+
+Plotting
+Abundance of shared OTUs between feed and intestinal samples.
+
+```{r}
+bp_shared_feed <- ggplot(shared_feed, aes(x = Diet, y = Abundance)) +
+  geom_boxplot(fill = "grey50", width = 0.5) +
+  geom_point() +
+  #facet_nested(~ Diet + Segment, scales = "free_x", nest_line = TRUE) +
+  labs(x = "", y = "Relative abundance of shared ASVs (%)", size = 8) +
+  scale_x_discrete(limit=c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")) +
+  scale_y_continuous(
+    limits = c(0, 100), breaks = 0:10*10, expand = expansion(c(0, 0))
+    ) + 
+  theme_bw() +
+  theme(axis.text.x = element_text (size = 6),
+        strip.background = element_blank(),
+        legend.position = "none")
+
+```
+
+Abundance of shared OTUs between water and intestinal samples.
+
+```{r}
+bp_shared_water <- shared_water %>%
+  ggplot(aes(x = Diet, y = Abundance)) +
+    geom_boxplot(fill = "grey50", width = 0.5) +
+    geom_point() +
+    #facet_nested(~ Diet + Segment, scales = "free_x", nest_line = TRUE) +
+    labs(x = "", y = "Relative abundance of shared ASVs (%)", size = 8) +
+    scale_y_continuous(
+      limits = c(0, 100), breaks = 0:10*10, expand = expansion(c(0, 0))
+      ) + 
+    scale_x_discrete(limit=c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")) +
+    theme_bw() +
+    theme(axis.text.x = element_text (size = 6),
+          strip.background = element_blank(),
+          legend.position = "none") 
+
+```
+
+Assemble plots
+```{r}
+bp_shared_feed + bp_shared_water
+```
+
+Figure 6
+
+```{r}
+library(patchwork)
+fig2a <- ovrl_bar_feed + bp_shared_feed + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = list(c("a", ""))) &
+  theme(
+    legend.position = "top",
+    legend.margin = margin(0, 0, 0, 0),
+    legend.box.margin = margin(10, 10, 10, 10))
+fig2b <- ovrl_bar_water + bp_shared_water +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = list(c("b", ""))) &
+  theme(
+    legend.position = "top",
+    legend.margin = margin(0, 0, 0, 0),
+    legend.box.margin = margin(10, 10, 10, 10))
+wrap_elements(full = fig2a) | wrap_elements(full = fig2b) 
+
+# export plot
+ggsave(("Figure 2.tiff"), width = 10, height = 5,
+       units = "in", dpi = 300, compression = "lzw")
+
+ggsave(("Figure 2.pdf"), width = 10, height = 5,
+       units = "in", dpi = 300)
+
+```
+
+
+
+acknowldements
+
+Modified from Li et al. (2021a) and Li et al. (2021b).
+
+Li, Y., Bruni, L., Jaramillo-Torres, A., Gajardo, K., Kortner, T.M., Krogdahl, Å., 2021. Differential response of digesta- and mucosa-associated intestinal microbiota to dietary insect meal during the seawater phase of Atlantic salmon. Animal Microbiome. 3, 8. https://doi.org/10.1186/s42523-020-00071-3.
+
+Li, Y., Gajardo, K., Jaramillo-Torres, A., Kortner, T.M., Krogdahl, Å., 2021b. Consistent changes in the intestinal microbiota of Atlantic salmon fed insect meal diets. https://doi.org/10.21203/rs.3.rs-692970/v1.
+
+
+
+
+
+
+

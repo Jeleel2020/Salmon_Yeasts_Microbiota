@@ -1,0 +1,461 @@
+---
+title: "Untitled"
+author: "Jeleel"
+date: "11/10/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(tidyverse)
+library(cowplot)  
+library(patchwork)  
+library(ggh4x) 
+##library(ggtext) 
+library(PerformanceAnalytics) 
+library(RColorBrewer) 
+library(MicrobeR)  
+library(microbiome) 
+##library(speedyseq) 
+library(flextable)   
+##library(webshot2) 
+library(officer)      
+library(DT) 
+library(ggsignif)
+library(Rcpp)
+library(dada2)
+library(phyloseq)
+library(permute)
+library(lattice)
+library(vegan)
+library(ggplot2)
+library(tidyverse)
+library(ggstatsplot)
+library(dplyr)
+library(microbiome)
+library(microbiomeutilities)
+library(knitr)
+library(RColorBrewer)
+library(DT)
+library(gt)
+library(cowplot)
+library(PerformanceAnalytics)
+library(venn)
+library(philr)
+library(MicrobeR)
+library("ape")
+library(Biostrings)
+library(gridExtra)
+library(ggsignif)
+library(lmerTest) 
+library(ggResidpanel) 
+library(emmeans)
+library(picante)
+set.seed(1910)
+library(ggpubr)
+```
+
+
+```{r}
+setwd ("/net/fs-1/home01/jeag/")
+
+ps_nocontam3 <- readRDS("ps_LULU.rds")
+
+# filter samples
+ps_nocontam3 <- ps_nocontam3 %>%
+  # remove the control samples
+  subset_samples(!Sample_type %in% c("control", "Positive_control"))
+
+# change OTU names for easy display
+indx <- formatC(1:ntaxa(ps_nocontam3), width = nchar(ntaxa(ps_nocontam3)), format = "d", flag = "0")
+taxa_names(ps_nocontam3) <- paste0("OTU", indx)
+
+# extract otu table, taxonomy and metadata
+otu <- as.data.frame(otu_table(ps_nocontam3)) 
+txnm <- tax_table(ps_nocontam3) %>% as("matrix") %>% as_tibble(rownames = NA)
+
+mtd <- data.frame(sample_data(ps_nocontam3), check.names = FALSE)
+
+```
+
+# Taxonomic assignment overview
+
+First of all, let's look at the coverage of taxonomic assignments at different rank levels.
+```{r}
+txnm_assg <- txnm %>%
+  gather("Rank", "Name", rank_names(ps_nocontam3)) %>%
+  group_by(Rank) %>%
+  # Empty taxonomic ranks may be na or strings containing "uncultured" or "Ambiguous_taxa"
+  summarize(OTUs_classified = sum(!is.na(Name) & !grepl("uncultured|Ambiguous|metagenome", Name))) %>%
+  mutate(
+    Frac_classified = OTUs_classified / ntaxa(ps_nocontam3),
+    Frac_classified = ifelse(
+      Frac_classified == 1, 
+      "100", 
+      round(Frac_classified * 100, 1)),
+    Frac_classified = paste(Frac_classified, "%"),
+    Rank = factor(Rank, rank_names(ps_nocontam3))) %>%
+  arrange(Rank) 
+
+txnm_assg %>%
+  datatable(options = list(columnDefs = list(list(className = 'dt-left', targets = c(0:3)))))
+```
+
+
+## Biological samples
+
+### Top15 genera
+
+```{r}
+taxa_tab <- Summarize.Taxa(otu, txnm)$Genus %>% Make.Percent() 
+taxa_tab <- taxa_tab[order(rowMeans(taxa_tab), decreasing = T), ]
+Others <- colSums(taxa_tab[16:nrow(taxa_tab), ])
+taxa_tab <- rbind(taxa_tab[1:15, ], Others)
+```
+
+
+Tidy taxa table for making stacked box plots.
+
+```{r}
+taxa_tab <- as.data.frame(taxa_tab) %>%
+  rownames_to_column("Taxa") %>%
+  separate(
+    Taxa, 
+    sep = ";", 
+    c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus")) %>% 
+  mutate(
+    Phylum = ifelse(
+      is.na(Phylum)|Phylum == "NA"|grepl("uncultured|Ambiguous|metagenome", Phylum), 
+      Kingdom, 
+      Phylum),
+    Class = ifelse(
+      is.na(Class)|Class == "NA"|grepl("uncultured|Ambiguous|metagenome", Class), 
+      Phylum, 
+      Class),
+    Order = ifelse(
+      is.na(Order)|Order == "NA"|grepl("uncultured|Ambiguous|metagenome", Order), 
+      Class, 
+      Order),
+    Family = ifelse(
+      is.na(Family)|Family == "NA"|grepl("uncultured|Ambiguous|metagenome", Family), 
+      Order, 
+      Family),
+    Genus = ifelse(
+      is.na(Genus)|Genus == "NA"|grepl("uncultured|Ambiguous|metagenome", Genus), 
+      Family, 
+      Genus)) %>%
+  select(-Kingdom, -(Class:Family))
+
+
+taxa_tab1 <- taxa_tab %>%
+  mutate(
+    Phylum = gsub("p__", "", Phylum),
+    Phylum = factor(Phylum, levels = rev(unique(Phylum))),
+    Genus = gsub("g__", "", Genus),
+    Genus = factor(Genus, levels = rev(unique(Genus)))) %>%
+  arrange(Phylum, Genus) %>%
+  mutate(Genus = factor(Genus, levels = unique(Genus))) %>%
+  pivot_longer(-c(Phylum, Genus), names_to = "SampleID", values_to = "Abundance") %>%
+  inner_join(rownames_to_column(mtd, "SampleID"), by = "SampleID")
+
+openxlsx::write.xlsx(taxa_tab1, file = "taxatable for digesta and water.xlsx")
+```
+
+
+
+### Boxplot to abundance of individual dominant taxa in the digesta samples grouped by diets
+
+```{r, fig.width=10}
+# define color scheme
+col <- c("grey", brewer.pal(n = 10, name = "Paired"))
+mtd$Diet <- factor(mtd$Diet, levels =  c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM"))
+taxa_tab1$Genus2 <- reorder(taxa_tab1$Genus, taxa_tab1$Abundance)
+# digesta samples
+taxa_boxplot_digesta <- filter(taxa_tab1, Sample_type == "Digesta") %>%
+  ggplot(aes(x = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")), y = Abundance, fill = Genus)) +
+  geom_boxplot(aes(fill = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM"))), alpha = 0.5, width = 0.5) +
+  labs(x = "Diets", y = "Relative abundance (%)") +
+  ##scale_y_continuous(breaks = 0:10*10, expand = c(0,0)) + 
+  scale_fill_manual(values = col) +
+  facet_wrap(
+    ~ Genus2,nrow = 4,
+    scale = "free"
+    
+    ) +
+  theme_bw() +
+  theme(##axis.text.x = element_blank(),
+        ##strip.background = element_blank(),
+        legend.position = "none") 
+
+# Export the plot
+ggsave("Figure S7.tiff", width = 10, height = 6,
+       units = "in", dpi = 300, compression = "lzw")
+ggsave("Figure S7.pdf", width = 10, height = 6,
+       units = "in", dpi = 300)
+
+
+```
+
+
+### Boxplot to abundance of individual dominant taxa in the feed samples grouped by diets
+```{r, fig.width=10}
+# define color scheme
+col <- c("grey", brewer.pal(n = 10, name = "Paired"))
+mtd$Diet <- factor(mtd$Diet, levels =  c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM"))
+taxa_tab1$Genus2 <- reorder(taxa_tab1$Genus, taxa_tab1$Abundance)
+# digesta samples
+taxa_boxplot_Feed <- filter(taxa_tab1, Sample_type == "Feed") %>%
+  ggplot(aes(x = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")), y = Abundance, fill = Genus)) +
+  geom_boxplot(aes(fill = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM"))), alpha = 0.5, width = 0.5) +
+  labs(x = "Diets", y = "Relative abundance (%)") +
+  ##scale_y_continuous(breaks = 0:10*10, expand = c(0,0)) + 
+  scale_fill_manual(values = col) +
+  facet_wrap(
+    ~ Genus2,nrow = 4,
+    scale = "free"
+    
+    ) +
+  theme_bw() +
+  theme(##axis.text.x = element_blank(),
+        ##strip.background = element_blank(),
+        legend.position = "none") 
+
+# Export the plot
+ggsave("Figure S13.tiff", width = 11, height = 6,
+       units = "in", dpi = 300, compression = "lzw")
+ggsave("Figure S13.pdf", width = 11, height = 6,
+       units = "in", dpi = 300)
+
+
+```
+
+
+### Boxplot to abundance of individual dominant taxa in the water samples grouped by diets
+```{r, fig.width=10}
+# define color scheme
+col <- c("grey", brewer.pal(n = 10, name = "Paired"))
+##mtd$Diet <- factor(mtd$Diet, levels =  c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM"))
+taxa_tab1$Genus2 <- reorder(taxa_tab1$Genus, taxa_tab1$Abundance)
+# digesta samples
+taxa_boxplot_water <- filter(taxa_tab1, Sample_type == "water") %>%
+  ggplot(aes(x = factor(fish_number, c("SW1", "SW2", "TW1", "TW2", "TW3", "TW4")), 
+             y = Abundance, fill = Genus)) +
+  geom_boxplot(aes(fill = factor(fish_number, c("SW", "TW"))), alpha = 0.5, width = 0.5) +
+  labs(x = "Water source", y = "Relative abundance (%)") +
+  ##scale_y_continuous(breaks = 0:10*10, expand = c(0,0)) + 
+  scale_fill_manual(values = col) +
+  facet_wrap(
+    ~ Genus2,nrow = 4,
+    scale = "free"
+    
+    ) +
+  theme_bw() +
+  theme(##axis.text.x = element_blank(),
+        ##strip.background = element_blank(),
+        legend.position = "none") 
+
+# Export the plot
+ggsave("Figure S14.tiff", width = 12, height = 6,
+       units = "in", dpi = 300, compression = "lzw")
+ggsave("Figure S14.pdf", width = 12, height = 6,
+       units = "in", dpi = 300)
+
+
+```
+
+
+##Flitering the dataframe into each individual taxonomic
+
+```{r}
+##Filter only the dataframe for only digesta 
+taxa_tab2 <- filter(taxa_tab1, Sample_type == "Digesta")
+##Filter taxa_tab2 dataframe for only the Pediococcus
+taxa_p <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Pediococcus")
+##Filter taxa_tab2 dataframe for only the Bacillaceae
+taxa_b <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Bacillaceae")
+##Filter taxa_tab2 dataframe for only RsaHf231
+taxa_r <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "RsaHf231")
+##Filter taxa_tab2 dataframe for only the Aliivibrio
+taxa_a <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Aliivibrio")
+##Filter taxa_tab2 dataframe for only the Weissella
+taxa_w <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Weissella")
+##Filter taxa_tab2 dataframe for only the Lactobacillales
+taxa_l <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Lactobacillales")
+##Filter taxa_tab2 dataframe for only Enterococcus
+taxa_e <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Enterococcus")
+##Filter taxa_tab2 dataframe for only the Peptostreptococcaceae
+taxa_pe <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Peptostreptococcaceae")
+##Filter taxa_tab2 dataframe for only the Ligilactobacillus
+taxa_li <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Ligilactobacillus")
+##Filter taxa_tab2 dataframe for only the HT002
+taxa_h <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "HT002")
+##Filter taxa_tab2 dataframe for only Streptococcus
+taxa_s <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Streptococcus")
+##Filter taxa_tab2 dataframe for only the Peptostreptococcus
+taxa_pep <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Peptostreptococcus")
+##Filter taxa_tab2 dataframe for only the Photobacterium
+taxa_ph <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Photobacterium")
+##Filter taxa_tab2 dataframe for only the Lactobacillus
+taxa_la <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Lactobacillus")
+##Filter taxa_tab2 dataframe for only Limosilactobacillus
+taxa_lim <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Limosilactobacillus")
+##Filter taxa_tab2 dataframe for only Others
+taxa_o <- taxa_tab2 %>%
+            filter(taxa_tab2$Genus == "Others")
+```
+
+
+Test the diet effect on individual taxonomy - Kruska-walis test
+
+```{r}
+##Statistics for Pediococcus
+kruskal.test(Abundance ~ Diet, data = taxa_p)
+##Statistics for Bacillaceae
+kruskal.test(Abundance ~ Diet, data = taxa_b)
+##Statistics for RsaHf231
+kruskal.test(Abundance ~ Diet, data = taxa_r)
+##Statistics for Aliivibrio
+kruskal.test(Abundance ~ Diet, data = taxa_a)
+##Statistics for Weissella
+kruskal.test(Abundance ~ Diet, data = taxa_w)
+##Statistics for Lactobacillales
+kruskal.test(Abundance ~ Diet, data = taxa_l)
+##Statistics for Enterococcus
+kruskal.test(Abundance ~ Diet, data = taxa_e)
+##Statistics for Peptostreptococcaceae
+kruskal.test(Abundance ~ Diet, data = taxa_pe)
+##Statistics for Ligilactobacillus 
+kruskal.test(Abundance ~ Diet, data = taxa_li)
+##Statistics for HT002
+kruskal.test(Abundance ~ Diet, data = taxa_h)
+##Statistics for Streptococcus
+kruskal.test(Abundance ~ Diet, data = taxa_s)
+##Statistics for Peptostreptococcus
+kruskal.test(Abundance ~ Diet, data = taxa_pep)
+##Statistics for Photobacterium
+kruskal.test(Abundance ~ Diet, data = taxa_ph)
+##Statistics for Lactobacillus
+kruskal.test(Abundance ~ Diet, data = taxa_la)
+##Statistics for Limosilactobacillus
+kruskal.test(Abundance ~ Diet, data = taxa_lim)
+##Statistics for Others
+kruskal.test(Abundance ~ Diet, data = taxa_o)
+
+```
+
+
+
+Pair-wise comparison
+The P-values for all the individual taxonomy, excpet Alliivibrio were less than 0.0001. Thus, we proceed to use wilcox pairwise comparison to identify differences between diets.
+
+```{r}
+##Statistics for Pediococcus
+wilcox <- compare_means(Abundance ~ Diet, taxa_p, method = "wilcox.test")
+##Statistics for Bacillaceae
+wilcox1 <- compare_means(Abundance ~ Diet, taxa_b, method = "wilcox.test")
+##Statistics for RsaHf231
+wilcox2 <- compare_means(Abundance ~ Diet, taxa_r, method = "wilcox.test")
+##Statistics for Aliivibrio
+wilcox3 <- compare_means(Abundance ~ Diet, taxa_a, method = "wilcox.test")
+##Statistics for Weissella
+wilcox4 <- compare_means(Abundance ~ Diet, taxa_w, method = "wilcox.test")
+##Statistics for Lactobacillales
+wilcox5 <- compare_means(Abundance ~ Diet, taxa_l, method = "wilcox.test")
+##Statistics for Enterococcus
+wilcox6 <- compare_means(Abundance ~ Diet, taxa_e, method = "wilcox.test")
+##Statistics for Peptostreptococcaceae
+wilcox7 <- compare_means(Abundance ~ Diet, taxa_pe, method = "wilcox.test")
+##Statistics for Ligilactobacillus 
+wilcox8 <- compare_means(Abundance ~ Diet, taxa_li, method = "wilcox.test")
+##Statistics for HT002
+wilcox9 <- compare_means(Abundance ~ Diet, taxa_h, method = "wilcox.test")
+##Statistics for Streptococcus
+wilcox10 <- compare_means(Abundance ~ Diet, taxa_s, method = "wilcox.test")
+##Statistics for Peptostreptococcus
+wilcox11 <- compare_means(Abundance ~ Diet, taxa_pep, method = "wilcox.test")
+##Statistics for Photobacterium
+wilcox12 <- compare_means(Abundance ~ Diet, taxa_ph, method = "wilcox.test")
+##Statistics for Lactobacillus
+wilcox13 <- compare_means(Abundance ~ Diet, taxa_la, method = "wilcox.test")
+##Statistics for Limosilactobacillus
+wilcox14 <- compare_means(Abundance ~ Diet, taxa_lim, method = "wilcox.test")
+##Statistics for Others
+wilcox15 <- compare_means(Abundance ~ Diet, taxa_p, method = "wilcox.test")
+
+##Write the pairwise wilcox comparison for each individual taxonomy into a CSV file to annotate Figures  using adobe illustrator on any of the editing software later
+write.csv(wilcox, file = "Wilcox pairwise comparison_Pediococcus", row.names = FALSE)
+write.csv(wilcox1, file = "Wilcox pairwise comparison_Bacillaceae", row.names = FALSE)
+write.csv(wilcox2, file = "Wilcox pairwise comparison_RsaHf231", row.names = FALSE)
+write.csv(wilcox3, file = "Wilcox pairwise comparison_Aliivibrio", row.names = FALSE)
+write.csv(wilcox4, file = "Wilcox pairwise comparison_Weissella", row.names = FALSE)
+write.csv(wilcox5, file = "Wilcox pairwise comparison_Lactobacillales", row.names = FALSE)
+write.csv(wilcox6, file = "Wilcox pairwise comparison_Enterococcus", row.names = FALSE)
+write.csv(wilcox7, file = "Wilcox pairwise comparison_Peptostreptococcaceae", row.names = FALSE)
+write.csv(wilcox8, file = "Wilcox pairwise comparison_Ligilactobacillus", row.names = FALSE)
+write.csv(wilcox9, file = "Wilcox pairwise comparison_HT002", row.names = FALSE)
+write.csv(wilcox10, file = "Wilcox pairwise comparison_Streptococcus", row.names = FALSE)
+write.csv(wilcox11, file = "Wilcox pairwise comparison_Peptostreptococcus", row.names = FALSE)
+write.csv(wilcox12, file = "Wilcox pairwise comparison_Photobacterium", row.names = FALSE)
+write.csv(wilcox13, file = "Wilcox pairwise comparison_Lactobacillus", row.names = FALSE)
+write.csv(wilcox14, file = "Wilcox pairwise comparison_Limosilactobacillus", row.names = FALSE)
+write.csv(wilcox15, file = "Wilcox pairwise comparison_Others", row.names = FALSE)
+
+##save them as excel file
+openxlsx::write.xlsx(wilcox, file = "Wilcox pairwise comparison_Pediococcus.xlsx")
+openxlsx::write.xlsx(wilcox1, file = "Wilcox pairwise comparison_Bacillaceae.xlsx")
+openxlsx::write.xlsx(wilcox2, file = "Wilcox pairwise comparison_RsaHf231.xlsx")
+openxlsx::write.xlsx(wilcox3, file = "Wilcox pairwise comparison_Aliivibrio.xlsx")
+openxlsx::write.xlsx(wilcox4, file = "Wilcox pairwise comparison_Weissella.xlsx")
+openxlsx::write.xlsx(wilcox5, file = "Wilcox pairwise comparison_Lactobacillales.xlsx")
+openxlsx::write.xlsx(wilcox6, file = "Wilcox pairwise comparison_Enterococcus.xlsx")
+openxlsx::write.xlsx(wilcox7, file = "Wilcox pairwise comparison_Peptostreptococcaceae.xlsx")
+openxlsx::write.xlsx(wilcox8, file = "Wilcox pairwise comparison_Ligilactobacillus.xlsx")
+openxlsx::write.xlsx(wilcox9, file = "Wilcox pairwise comparison_HT002.xlsx")
+openxlsx::write.xlsx(wilcox10, file = "Wilcox pairwise comparison_Streptococcus.xlsx")
+openxlsx::write.xlsx(wilcox11, file = "Wilcox pairwise comparison_Peptostreptococcus.xlsx")
+openxlsx::write.xlsx(wilcox12, file = "Wilcox pairwise comparison_Photobacterium.xlsx")
+openxlsx::write.xlsx(wilcox13, file = "Wilcox pairwise comparison_Lactobacillus.xlsx")
+openxlsx::write.xlsx(wilcox14, file = "Wilcox pairwise comparison_Limosilactobacillus.xlsx")
+openxlsx::write.xlsx(wilcox15, file = "Wilcox pairwise comparison_Others.xlsx")
+
+```
+
+
+
+
+
+```{r}
+taxa_digesta <- filter(taxa_tab1, Sample_type == "Digesta")
+openxlsx::write.xlsx(taxa_tab1, file = "taxa_digesta.xlsx")
+```
+
+
+
+
+
+
+
+
+
+
+
+

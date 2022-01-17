@@ -1,0 +1,685 @@
+---
+title: "Beta diversity"
+author: "Jeleel"
+date: "11/09/2021"
+output: pdf_document
+---
+
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Load the required package. Some of these package are not needed here, but are loaded from the previous steps 
+```{r}
+library(Rcpp)
+library(dada2)
+library(phyloseq)
+library(permute)
+library(lattice)
+library(vegan)
+library(ggplot2)
+library(tidyverse)
+library(ggstatsplot)
+library(dplyr)
+library(microbiome)
+library(microbiomeutilities)
+library(knitr)
+library(RColorBrewer)
+library(DT)
+library(gt)
+library(cowplot)
+library(PerformanceAnalytics)
+library(venn)
+library(philr)
+library(MicrobeR)
+library(ranacapa)
+library(ape)
+library(plotly)
+library(cluster)
+library(pairwiseAdonis)
+library(ggpubr)
+```
+
+
+
+##Read the phyloseq object for digesta samples only
+```{r}
+setwd ("/net/fs-1/home01/jeag/")
+pseq <- readRDS("ps_nocontam2.rds")
+pseq_oo <- readRDS("ps_LULU.rds")
+
+```
+
+##Check sample rarefraction curve. Here I checked the curve for individual samples. it would have been good to group the diets 
+```{r}
+p <- ggrare(pseq, step = 1000, color ="Diet", label = "Diet", se = FALSE)
+p <- p + facet_wrap(~Diet)
+p
+pseq1 <- subset_samples(pseq, Diet == "FM")
+p1 <- ggrare(pseq1, step = 1000, color ="Diet", label = "Diet", se = FALSE)
+pseq2 <- subset_samples(pseq, Diet == "ICJ")
+p2 <- ggrare(pseq2, step = 1000, color ="Diet", label = "Diet", se = FALSE)
+pseq3 <- subset_samples(pseq, Diet == "ACJ")
+p3 <- ggrare(pseq3, step = 1000, color ="Diet", label = "Diet", se = FALSE)
+pseq4 <- subset_samples(pseq, Diet == "IWA")
+p4 <- ggrare(pseq4, step = 100, color ="Diet", label = "Diet", se = FALSE)
+pseq5 <- subset_samples(pseq, Diet == "AWA")
+p5 <- ggrare(pseq5, step = 100, color ="Diet", label = "Diet", se = FALSE)
+pseq6 <- subset_samples(pseq, Diet == "SBM")
+p6 <- ggrare(pseq6, step = 100, color ="Diet", label = "Diet", se = FALSE)
+```
+
+##Check the number of sequence and species numbers in each sample for the original phyloseq object. This is to visualize the sequnce size and number of species (ASVs) per samples
+```{r}
+sample_sums(pseq)
+a <- sample_sums(pseq_oo)
+a <- as.data.frame(a)
+count_tab <- as.data.frame(otu_table(pseq))
+specnumber((count_tab))
+count_tab1 <- as.data.frame(otu_table(pseq_oo))
+specnumber((count_tab1))
+b <- as.data.frame(b)
+```
+
+
+##Rarefied the phyloseq object based on minimum sequence size in the sample. This is for normalization of the sequence for checking some of the beta diversity indices. This is explain further below. The phyloseq object are rarefied to minium sequence (i.e. 1687 in this case)
+# Ordination
+#As beta-diversity metrics are sensitive to differences in the sequencing depth of samples, a common way to mitagete this problem is to rarefy the feature table, i.e., downsample count data to the lowest count in the dataset. However, rarefying results in loss of sequence data and throws away samples with extremely low sequence counts. Alternative approaches for normaizing library sizes have been proposed [(McMurdie et al., 2014)](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1003531), such as DESeq2’s variance stabilization technique [(Love et al., 2014)](https://www.ncbi.nlm.nih.gov/pubmed/25516281) and metagenomeSeq’s CSS [(Paulson et al., 2013)](https://www.nature.com/articles/nmeth.2658)). While these alternative methods showed promising results, they are not reccomended for presence/absence metrics, such as Jaccard or unweighted-UniFrac, as the resulting ordination may be distorted. For the presence/absence metrics, rarefying is the best solution at present. [(Weiss et al., 2017)](https://microbiomejournal.biomedcentral.com/articles/10.1186/s40168-017-0237-y)). 
+
+#Another apporach to get around the issue of differential sequencing depth is to analyze the microbiome sequence data using compositional data analysis approaches. Microbiome sequence data are compositional, i.e., they are represented by relative abundances or proportions which individually carry no meaning for the absolute abundance of a specific feature [(Aitchison, 1986)](https://www.jstor.org/stable/2345821?seq=1#metadata_info_tab_contents). Applying standard statistical tools, such as *t*-test, Wilcoxon rank-sum test, *ANOVA* and Pearson correlation coefficient, directly to compositional data produces spurious resutls. The first step of compositional data analysis is to convert the relative abundances of each part, or the values in the table of counts for each part, to ratios between all parts, such that existing statistical methods may be applied without introducing spurious conclusions [(Gloor et al., 2017)](https://www.frontiersin.org/articles/10.3389/fmicb.2017.02224/full). Commonly used data transformation include centered log-ratio transformation (CLR) and isometric log-ration transformation (ISL), during which the differences in the library sizes are cancelled out. This means that all the samples and sequence data are used without having to fit a distribution model to the data. Recently developed methods for beta-diversity analysis that take into account the compositional nature of the microbiome sequence data include PhILR and roboust Aitchison PCA.
+
+#In this section, both unweighted (presence/absence) and weighted metrics, computed from rarefied and unrarefied feature table respectively, will be used for ordination.
+
+```{r}
+set.seed(100000)
+ps.rarefied = rarefy_even_depth(pseq, rngseed=1, sample.size=min(sample_sums(pseq)), replace=F)
+sample_sums(ps.rarefied)
+```
+
+##Check the number of sequence and species numbers in the rarefied phyloseq object
+```{r}
+sample_sums(ps.rarefied)
+count_tab1 <- as.data.frame(otu_table(ps.rarefied))
+specnumber((count_tab1))
+```
+
+##Check the rarefraction curve for the rarefied phyloseq. 
+```{r}
+p7 <- ggrare(ps.rarefied, step = 100, color ="Diet", se = FALSE)
+
+ggsave("Figure S1.tiff", width = 8, height = 9,
+       units = "in", dpi = 300, compression = "lzw")
+
+ggsave("Figure S1.pdf", width = 8, height = 9,
+       units = "in", dpi = 300)
+
+
+```
+
+##Extract metadata from the phyloseq object as data frame.
+```{r}
+metadata <- data.frame(sample_data(pseq), check.names = FALSE) 
+```
+
+
+##Beta diversity - Unweighted unifrac distance and jaccard distance with rarefied phyloseq object
+```{r}
+ # PCoA plot using the unweighted UniFrac as distance
+wunifrac_dist = phyloseq::distance(ps.rarefied, method="unifrac", weighted=F)
+ord_unwuf = ordinate(ps.rarefied, method="PCoA", distance=wunifrac_dist)
+```
+
+##Plotting the PCOA for unweighted unifrac (2D plot)
+```{r}
+
+pco_uwuf <- as.data.frame(ord_unwuf$vectors) %>%
+  rownames_to_column("SampleID") %>%
+  full_join(., rownames_to_column(metadata, "SampleID"), by = "SampleID") 
+
+labs_uwuf <- paste0("PCo", 1:length(ord_unwuf$values$Eigenvalues), ": ", 
+                     round((100*ord_unwuf$values$Eigenvalues/sum(ord_unwuf$values$Eigenvalues)),1), "%")
+
+p_uwuf <- ggplot(pco_uwuf, aes(x = Axis.1, y = Axis.2, color = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")))) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  geom_point(size = 4) +
+  labs(title = "PCoA of Unweighted unifrac", color = "Diet",
+       x = labs_uwuf[1],
+       y = labs_uwuf[2]) +
+  scale_color_manual(values = brewer.pal(n = 12, name = "Paired")[c(2,1,8,7, 9, 3)]) +
+  theme_cowplot() +
+  panel_border(colour = "black") 
+
+p_uwuf
+```
+
+
+
+
+##Plotting the PCOA for unweighted unifrac (interactive 3D plot)
+```{r pcoa_uwuf_3d}
+plot_ly(x = pco_uwuf[,"Axis.1"], y = pco_uwuf[,"Axis.2"], z = pco_uwuf[,"Axis.3"], 
+        type = "scatter3d", mode = "markers", color = factor(metadata$Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")), 
+        colors = brewer.pal(n = 12, name = "Paired")[c(2,1,8,7, 9, 3)]) %>%
+        layout(scene = list(xaxis = list(title = labs_uwuf[1]),
+                            yaxis = list(title = labs_uwuf[2]),
+                            zaxis = list(title = labs_uwuf[3])
+                        ))
+```
+
+
+
+
+##PCOA using the jaccard as distance
+```{r}
+jacc_dist <- phyloseq::distance(ps.rarefied, method = "jaccard", binary = TRUE)
+ord_jac = ordinate(ps.rarefied, method="PCoA", distance=jacc_dist)
+
+```
+
+##Plotting the PCOA for jaccard distance (2D plot)
+```{r}
+
+pco_jac <- as.data.frame(ord_jac$vectors) %>%
+  rownames_to_column("SampleID") %>%
+  full_join(., rownames_to_column(metadata, "SampleID"), by = "SampleID") 
+
+labs_jac <- paste0("PCo", 1:length(ord_jac$values$Eigenvalues), ": ", 
+                     round((100*ord_jac$values$Eigenvalues/sum(ord_jac$values$Eigenvalues)),1), "%")
+
+p_jac <- ggplot(pco_jac, aes(x = Axis.1, y = Axis.2, color = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")))) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  geom_point(size = 4) +
+  labs(title = "PCoA of jaccard distance", color = "Diet",
+       x = labs_jac[1],
+       y = labs_jac[2]) +
+  scale_color_manual(values = brewer.pal(n = 12, name = "Paired")[c(2,1,8,7, 9, 3)]) +
+  theme_cowplot() +
+  panel_border(colour = "black") 
+p_jac
+```
+
+
+##Plotting the PCOA for jaccard distance (interactive 3D plot)
+```{r pcoa_uwuf_3d}
+plot_ly(x = pco_jac[,"Axis.1"], y = pco_jac[,"Axis.2"], z = pco_jac[,"Axis.3"], 
+        type = "scatter3d", mode = "markers", color = factor(metadata$Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")), 
+        colors = brewer.pal(n = 12, name = "Paired")[c(2,1,8,7, 9, 3)]) %>%
+        layout(scene = list(xaxis = list(title = labs_jac[1]),
+                            yaxis = list(title = labs_jac[2]),
+                            zaxis = list(title = labs_jac[3])
+                        ))
+```
+
+
+####Beta diversity - Robust Aitchison PCA and Phylogenetic Isometric Log-Ratio Transform (PHLR) on full phyloseq object 
+
+#### Roboust Aitchison PCA
+##Roboust Aitchison PCA (RPCA) is a compositional beta diversity metric rooted in a centered log-ratio transformation and matrix completion [(Martino et al., 2019)](https://msystems.asm.org/content/4/1/e00016-19). Aitchison distance was used as the distance metric in the roboust Aitchison PCA for its desirable properties: 1)scale invariant, which ensures equivalence between distances computed from absolute and relative abundance measurements, negating the need to perform rarefaction; 2)relative changes driven. Microbes that display large fold change across samples will be weighted more heavily, which makes the ordination roboust to random fluctuations of high-abundant taxa; 3)subcompositionally coherent, which guarantees that distances will never decrease if additional taxa are observed. HOwever, Aitchison distance cannot handle zeros and is thus challenging to apply to the sparse microbiome data. To circumvent this issue, RPCA treats all zeros as missing values and builds a model to handle this missing data using matrix completion. 
+
+
+##Note that RPCA is not exactly performing PCA. It is performing PCoA using the Aitchison distance, which is calculated from the Euclidean distance of the clr-transformed data. Since PCoA with Euclidean distance is equivalent to PCA, the method is called PCA though it's in fact running PCoA.
+
+
+##centered log-ratio transformation of phyloseq object and extraction of principal componenents and variance explained for plotting
+```{r}
+ps_clr <- microbiome::transform(pseq, "clr") 
+#check the original phyloseq object
+phyloseq::otu_table(pseq)[10:20, 10:20]
+#check the clr transformed object
+phyloseq::otu_table(ps_clr)[10:20, 10:20]
+#PCA via phyloseq
+ord_clr <- phyloseq::ordinate(ps_clr, "RDA")
+```
+
+##Plotting the PCOA for Roboust Aitchison PCA (2D plot)
+```{r}
+
+pco_aitchison <- as.data.frame(ord_clr$CA$u) %>%
+  rownames_to_column("SampleID") %>%
+  full_join(., rownames_to_column(metadata, "SampleID"), by = "SampleID") 
+
+labs_aitchison <- paste0("PCo", 1:length(ord_clr$CA$eig), ": ", 
+                     round((100*ord_clr$CA$eig/sum(ord_clr$CA$eig)),1), "%")
+
+p_aitchison <- ggplot(pco_aitchison, aes(x = PC1, y = PC2, color = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")))) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  geom_point(size = 4) +
+  labs(title = "PCoA of Roboust Aitchison", color = "Diet",
+       x = labs_aitchison[1],
+       y = labs_aitchison[2]) +
+  scale_color_manual(values = brewer.pal(n = 12, name = "Paired")[c(2,1,8,7, 9, 3)]) +
+  theme_cowplot() +
+  panel_border(colour = "black") 
+p_aitchison
+```
+
+
+##Plotting the PCOA for Roboust Aitchison (interactive 3D plot)
+```{r pcoa_uwuf_3d}
+plot_ly(x = pco_aitchison[,"PC1"], y = pco_aitchison[,"PC2"], z = pco_aitchison[,"PC3"], 
+        type = "scatter3d", mode = "markers", color = factor(metadata$Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")), 
+        colors = brewer.pal(n = 12, name = "Paired")[c(2,1,8,7, 9, 3)]) %>%
+        layout(scene = list(xaxis = list(title = labs_aitchison[1]),
+                            yaxis = list(title = labs_aitchison[2]),
+                            zaxis = list(title = labs_aitchison[3])
+                        ))
+```
+
+
+# PCoA of Euclidean distance calculated on PhILR transformed data
+##PhILR is short for "Phylogenetic Isometric Log-Ratio Transform". The goal of PhILR is to transform compositional data into an orthogonal unconstrained space (real space) with phylogenetic / evolutionary interpretation while preserving all information contained in the original composition. For a given set of samples consisting of measurements of taxa, we transform data into a new space of  samples and  orthonormal coordinates termed ‘balances’. Each balance is associated with a single internal node  of a phylogenetic tree with the taxa as leaves. The balance represents the log-ratio of the geometric mean abundance of the two groups of taxa that descend from the given internal node. More details on this method can be found in the paper ["A phylogenetic transform enhances analysis of compositional microbiota data"](https://elifesciences.org/content/6/e21887). 
+
+### Filter and transform the feature table
+##In the original paper and *PhILR* pakcage tutorial, taxa that were not seen with more than 3 counts in at least 20% of samples or with a coefficient of variation ≤ 3 were filtered. For the present data set, we'll not do data filtering as it results in great loss of data. We'll just add a pseudocount of 1 to the feature table to avoid calculating log-ratios involving zeros. 
+
+
+##PhILR transformation of phyloseq object
+```{r transform_phyloseq, message=FALSE, warning=FALSE}
+#pseq <- filter_taxa(pseq, function(x) sum(x > 3) > (0.2 * length(x)), TRUE)
+#pseq <- filter_taxa(phyloseq, function(x) sd(x)/mean(x) > 3.0, TRUE)
+pseq_t <- transform_sample_counts(pseq, function(x) x + 1)
+```
+
+### Process phylogenetic tree
+##Next we check that the tree is rooted and binary (all multichotomies have been resolved). 
+```{r check_tree, message=FALSE, warning=FALSE}
+is.rooted(phy_tree(pseq_t)) # Is the tree Rooted?
+is.binary.tree(phy_tree(pseq_t)) # All multichotomies resolved?
+```
+
+##As the tree is not binary, we use the function `multi2di` from the `ape` package to replace multichotomies with a series of dichotomies with one (or several) branch(es) of zero length. 
+##Since our tree was binary from above, we can omit this step I think. Otherwise do this step
+
+```{r make_binary_tree, message=FALSE, warning=FALSE}
+phy_tree(pseq) <- multi2di(phy_tree(pseq)) 
+is.binary.tree(phy_tree(pseq)) 
+```
+
+##Now we name the internal nodes of the tree so they are easier to work with. We prefix the node number with `n` and thus the root is named `n1`. 
+
+```{r add_prefix, message=FALSE, warning=FALSE}
+phy_tree(pseq_t) <- makeNodeLabel(phy_tree(pseq_t), method = "number", prefix = 'n')
+```
+
+##We note that the tree is already rooted with Bacteria as the outgroup and no multichotomies are present. This uses the function `name.balance` from the `philr` package. This function uses a simple voting scheme to find a consensus naming for the two clades that descend from a given balance. Specifically for a balance named `x/y`, `x` refers to the consensus name of the clade in the numerator of the log-ratio and `y` refers to the denominator. 
+```{r check_branch_name}
+name.balance(phy_tree(pseq_t), tax_table(pseq_t), 'n1')
+name.balance(phy_tree(pseq_t), tax_table(pseq_t), 'n10')
+```
+
+### Investigate dataset components
+##Finally we transpose the ASV table (`philr` uses the conventions of the `compositions` package for compositional data analysis in R, taxa are columns, samples are rows). Then we will take a look at part of the dataset in more detail.
+## We didnt transpose the ASV table here because the taxa are rows and samples are columns). if the opposite, you should transpose the table by using t((otu_table(pseq_t)))
+```{r check_objects}
+table_philr <- (otu_table(pseq_t))
+table_philr[1:2,1:2] 
+tree <- phy_tree(pseq_t)
+tree 
+```
+
+
+### Transform data using PhILR
+##The function `philr::philr()` implements a user friendly wrapper for the key steps in the philr transform. 
+
+##1. Convert the phylogenetic tree to its sequential binary partition (SBP) representation using the function `philr::phylo2sbp()`
+##2. Calculate the weighting of the taxa (aka parts) or use the user specified weights
+##3. Built the contrast matrix from the SBP and taxa weights using the function `philr::buildilrBasep()`
+##4. Convert ASV table to relative abundance (using `philr::miniclo()`) and 'shift' dataset using the weightings via the function `philr::shiftp()`.
+##5. Transform the data to PhILR space using the function `philr::ilrp()`
+##6. (Optional) Weight the resulting PhILR space using phylogenetic distance. These weights are either provided by the user or can be calculated by the function `philr::calculate.blw()`. 
+
+##Note: The preprocessed ASV table should be passed to the function `philr::philr()` before it is closed (normalized) to relative abundances, as some of the preset weightings of the taxa use the original count data to down weight low abundance taxa. 
+
+##Here we will use the same weightings as used in the original paper.
+
+```{r add_weightings}
+philr <- philr(table_philr, tree, part.weights = 'enorm.x.gm.counts', ilr.weights = 'blw.sqrt')
+philr[1:5,1:5]
+```
+
+##Now the transformed data is represented in terms of balances and since each balance is associated with a single internal node of the tree, we denote the balances using the same names we assigned to the internal nodes (e.g., `n1`). 
+
+### Ordination in PhILR space
+##Euclidean distance in PhILR space can be used for ordination analysis. First we compute the Euclidean distance and run PCoA using the `ordinate()` function from the *phyloseq* package.
+```{r compute_pcoa_philr}
+# Compute Euclidean distance on PhILR transformed data
+dist_philr <- dist(philr, method = "euclidean")
+# Ordination by PCoA
+ord_philr <- ordinate(pseq_t, 'PCoA', distance = dist_philr)
+```
+
+##Extract principal coordinates and variance explained for plotting.
+```{r prep_philr}
+pco_philr <- as.data.frame(ord_philr$vectors) %>%
+  rownames_to_column("SampleID") %>%
+  full_join(., rownames_to_column(metadata, "SampleID"), by = "SampleID") 
+
+labs_philr <- paste0("PCo", 1:length(ord_philr$values$Eigenvalues), ": ", 
+                     round((100*ord_philr$values$Eigenvalues/sum(ord_philr$values$Eigenvalues)),1), "%")
+```
+
+### ##Plotting the PCOA for PhILR transformed data (2D plot)
+```{r pcoa_philr_2d}
+p_philr <- ggplot(pco_philr, aes(x = Axis.1, y = Axis.2, color = factor(Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")))) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  geom_point(size = 4) +
+  labs(title = "PCoA of PhILR transformed data", color = "Diet",
+       x = labs_philr[1],
+       y = labs_philr[2]) +
+  scale_color_manual(values = brewer.pal(n = 12, name = "Paired")[c(2,1,8,7, 9, 3)]) +
+  theme_cowplot() +
+  panel_border(colour = "black") 
+p_philr
+```
+
+
+##Plotting the PCOA for PhILR transformed data (interactive 3D plot)
+```{r pcoa_uwuf_3d}
+plot_ly(x = pco_philr[,"Axis.1"], y = pco_philr[,"Axis.2"], z = pco_philr[,"Axis.3"], 
+        type = "scatter3d", mode = "markers", color = factor(metadata$Diet, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")), 
+        colors = brewer.pal(n = 12, name = "Paired")[c(2,1,8,7)]) %>%
+        layout(scene = list(xaxis = list(title = labs_philr[1]),
+                            yaxis = list(title = labs_philr[2]),
+                            zaxis = list(title = labs_philr[3])
+                        ))
+```
+
+## Assemble plots
+```{r assemble_pcoa_plots, fig.width=10, fig.height=6}
+# Get legend
+legend <- get_legend(p_jac)
+# Reduce point size
+p_jac$layers[[3]]$aes_params$size <- 3 
+p_uwuf$layers[[3]]$aes_params$size <- 3
+p_aitchison$layers[[3]]$aes_params$size <- 3
+p_philr$layers[[3]]$aes_params$size <- 3
+# Assemble plots
+ps <- plot_grid(
+  p_jac + theme(legend.position = "none", plot.title = element_blank()), 
+  p_uwuf + theme(legend.position = "none", plot.title = element_blank()),
+  p_aitchison + theme(legend.position = "none", plot.title = element_blank()), 
+  p_philr + theme(legend.position = "none", plot.title = element_blank()),
+  ncol = 2, labels = "AUTO", align = 'vh')
+# Add legend to the assembled plot
+plot_grid(ps, legend, rel_widths = c(6, 1))
+# Export the plot
+ggsave("Figure 4.tiff", width = 10, height = 6,
+       units = "in", dpi = 300, compression = "lzw")
+ggsave("Figure 4.pdf", width = 10, height = 6,
+       units = "in", dpi = 300)
+
+```
+
+
+
+## permutational multivariate analysis of variance (PERMANOVA) test for the four beta-diversity distances on rarified and full phyloseq objects
+
+```{r}
+##for the unweighted unifrac distance
+vegan::adonis(wunifrac_dist ~ phyloseq::sample_data(ps.rarefied)$Diet)
+##for the  jaccard distance
+vegan::adonis(jacc_dist ~ phyloseq::sample_data(ps.rarefied)$Diet)
+##Compute aitchison distance 
+aitchison_dist <- phyloseq::distance(ps_clr, method = "euclidean")
+##PERMANOVA for the aitchison distance
+vegan::adonis(aitchison_dist ~ phyloseq::sample_data(pseq)$Diet)
+##PERMANOVA for the PhILR transformed data
+vegan::adonis(dist_philr ~ phyloseq::sample_data(pseq)$Diet)
+
+
+```
+
+## with the script in the preceeding chunks, we have shown with PERMANOVA test that there is significance difference (P < 0.001 ***) four the four beta diversity indices, now here we are interested in pairwise comparison to figure out how each diet differs from one another. In this particular study, the dietary consist of a negative control (FM), a positive control (SBM) and four other diets containing SBM with yeasts (ICJ, ACJ, IWA, and AWA). for this comparison, we will compare the four treatment with the two control diets. However, if you are interested in comparing all the diets the codes are also written in the chunks 
+
+#PERMANOVA pariwise comparison for unweighted unifrac distance
+```{r}
+##PERMANOVA pariwise comparison for unweighted unifrac distance
+
+
+pw_uwuf_full <- pairwise.adonis(wunifrac_dist, pco_uwuf$Diet)  
+# pairwise.adonis(wunifrac_dist, pco_uwuf$Diet, reduce = 'FM') comparison of the remaining diets with FM.
+
+##Comparison of the remaining diets with FM and SBM controls
+pw_uwuf <- pairwise.adonis(wunifrac_dist, pco_uwuf$Diet, reduce = 'FM|SBM')
+# export data as excel file
+write.csv(pw_uwuf, file = "PERMANOVA for unweighted unifrac", row.names = FALSE)
+write.csv(pw_uwuf_full, file = "PERMANOVA for unweighted unifrac for the diets", row.names = FALSE)
+
+```
+
+
+#PERMANOVA pariwise comparison for jaccard distance
+```{r}
+##PERMANOVA pariwise comparison for jaccard distance
+
+#comparison among all the diets.
+pw_jac_full <- pairwise.adonis(jacc_dist, pco_jac$Diet)  
+# pairwise.adonis(jacc, pco_jac$Diet, reduce = 'FM') comparison of the remaining diets with FM.
+
+##Comparison of the remaining diets with FM and SBM controls
+pw_jac <- pairwise.adonis(jacc_dist, pco_jac$Diet, reduce = 'FM|SBM')
+# export data as excel file
+write.csv(pw_jac, file = "PERMANOVA for jaccard distance", row.names = FALSE)
+write.csv(pw_jac_full, file = "PERMANOVA for jaccard distance for the diets", row.names = FALSE)
+
+```
+
+#PERMANOVA pariwise comparison for Robust aitchison distance
+```{r}
+##PERMANOVA pariwise comparison for Robust aitchison distance
+
+#comparison among all the diets.
+pw_aitchison_full <- pairwise.adonis(aitchison_dist, pco_aitchison$Diet)  
+# pairwise.adonis(jacc, pco_jac$Diet, reduce = 'FM') comparison of the remaining diets with FM.
+
+##Comparison of the remaining diets with FM and SBM controls
+pw_aitchison <- pairwise.adonis(aitchison_dist, pco_aitchison$Diet, reduce = 'FM|SBM')
+# export data as excel file
+write.csv(pw_aitchison, file = "PERMANOVA for Robust aitchison distance", row.names = FALSE)
+write.csv(pw_aitchison_full, file = "PERMANOVA for Robust aitchison distance for the diets", row.names = FALSE)
+
+```
+
+#PERMANOVA pariwise comparison for PhILR distance
+```{r}
+##PERMANOVA pariwise comparison for Robust aitchison distance
+
+#comparison among all the diets.
+pw_philr_full <- pairwise.adonis(dist_philr, pco_philr$Diet)  
+# pairwise.adonis(jacc, pco_jac$Diet, reduce = 'FM') comparison of the remaining diets with FM.
+
+##Comparison of the remaining diets with FM and SBM controls
+pw_philr <- pairwise.adonis(dist_philr, pco_philr$Diet, reduce = 'FM|SBM')
+# export data as excel file
+write.csv(pw_philr, file = "PERMANOVA for PhILR distance", row.names = FALSE)
+write.csv(pw_philr_full, file = "PERMANOVA for PhILR distance for the diets", row.names = FALSE)
+
+```
+
+
+#Since the PERMANOVA is testing differences in both location and dispersion effects, it's important to test the homogeneity of multivariate dispersions following a significant PERMANVOA result.The homogeneity of multivariate dispersions can be assessed visually (PCoA plot/boxplot) or via a statistical test called PERMDISP, which is implemented in R by the `betadisper()` function from the *vegan* package.
+
+## Unweighted distance
+
+```{r}
+dispr_uwuf <- vegan::betadisper(wunifrac_dist, phyloseq::sample_data(pseq)$Diet, type = "median")
+dispr_uwuf
+
+# Permutaion test
+permdisp_uwuf <- permutest(dispr_uwuf, pairwise = TRUE, permutations = 999)
+permdisp_uwuf
+```
+
+#Visual inspection
+
+```{r}
+#PCOA plot showing the distance to centroid for each group
+pc_uwuf <- plot(dispr_uwuf, main = "Ordination Centroids and Dispersion Labeled: Unweighted unifrac", sub = "")
+#Box plot showing the distance to centroid for each group
+bp_uwuf <- data.frame(dist = dispr_uwuf$distances, group = dispr_uwuf$group) %>%
+  ggplot(aes(x = factor(group, levels = c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")),y = dist)) +
+    geom_boxplot(aes(fill =  factor(group, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")))) +
+    labs(x = "Diet", y = "Distance to centroid", 
+         title = "Unweighted unifrac distance", fill = "Diet") +
+    theme_minimal(base_size = 14) +
+    theme(plot.title = element_text(hjust = 0.5))
+bp_uwuf
+```
+
+## jaccard distance
+
+```{r}
+dispr_jac <- vegan::betadisper(jacc_dist, phyloseq::sample_data(pseq)$Diet, type = "median")
+dispr_jac
+
+# Permutaion test
+permdisp_jac <- permutest(dispr_jac, pairwise = TRUE, permutations = 999)
+permdisp_jac
+```
+
+#Visual inspection
+
+```{r}
+#PCOA plot showing the distance to centroid for each group
+pdf("jaccard.pdf", width = 16, height = 10)
+pc_jac <- plot(dispr_jac, main = "Ordination Centroids and Dispersion Labeled: Jaccard distance", sub = "")
+dev.off()
+#Box plot showing the distance to centroid for each group
+bp_jac <- data.frame(dist = dispr_jac$distances, group = dispr_jac$group) %>%
+  ggplot(aes(x = factor(group, levels = c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")),y = dist)) +
+    geom_boxplot(aes(fill =  factor(group, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")))) +
+    labs(x = "Diet", y = "Distance to centroid", 
+         title = "Jaccard distance", fill = "Diet") +
+    theme_minimal(base_size = 14) +
+    theme(plot.title = element_text(hjust = 0.5))
+bp_jac
+```
+
+## Robust aitchison distance
+
+```{r}
+dispr_aitchison <- vegan::betadisper(aitchison_dist, phyloseq::sample_data(pseq)$Diet, type = "median")
+dispr_aitchison
+
+# Permutaion test
+permdisp_aitchison <- permutest(dispr_aitchison, pairwise = TRUE, permutations = 999)
+permdisp_aitchison
+```
+
+#Visual inspection
+
+```{r}
+#PCOA plot showing the distance to centroid for each group
+pc_aitchison <- plot(dispr_aitchison, main = "Ordination Centroids and Dispersion Labeled: Robust aitchison distance", sub = "")
+#Box plot showing the distance to centroid for each group
+bp_aitchison<- data.frame(dist = dispr_aitchison$distances, group = dispr_aitchison$group) %>%
+  ggplot(aes(x = factor(group, levels = c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")),y = dist)) +
+    geom_boxplot(aes(fill =  factor(group, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")))) +
+    labs(x = "Diet", y = "Distance to centroid", 
+         title = "Robust aitchison distance", fill = "Diet") +
+    theme_minimal(base_size = 14) +
+    theme(plot.title = element_text(hjust = 0.5))
+bp_aitchison
+```
+
+## ## PHILR transformed euclidean distance
+
+```{r}
+dispr_philr <- vegan::betadisper(dist_philr, phyloseq::sample_data(pseq)$Diet, type = "median")
+dispr_philr
+
+# Permutaion test
+permdisp_philr <- permutest(dispr_philr, pairwise = TRUE, permutations = 999)
+permdisp_philr
+```
+
+#Visual inspection
+
+```{r}
+#PCOA plot showing the distance to centroid for each group
+
+pdf("Philr.pdf", width = 16, height = 10)
+pc_philr <- plot(dispr_philr, main = "Ordination Centroids and Dispersion Labeled: PHILR transformed euclidean distance", sub = "")
+dev.off()
+
+#Box plot showing the distance to centroid for each group
+bp_philr<- data.frame(dist = dispr_philr$distances, group = dispr_philr$group) %>%
+  ggplot(aes(x = factor(group, levels = c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")),y = dist)) +
+    geom_boxplot(aes(fill =  factor(group, c("FM", "ICJ", "ACJ", "IWA", "AWA", "SBM")))) +
+    labs(x = "Diet", y = "Distance to centroid", 
+         title = "PHILR distance", fill = "Diet") +
+    theme_minimal(base_size = 14) +
+    theme(plot.title = element_text(hjust = 0.5))
+bp_philr
+```
+
+
+
+### Assemble PCOA and Boxplot for testing the homogeneity of multivariate dispersions 
+
+```{r}
+pdf("PERMANOVA PCOA.pdf", width = 16, height = 10)
+old.par <- par(mfrow=c(2, 2))
+pc_jac <- plot(dispr_jac, main = "Ordination Centroids and Dispersion Labeled:Jaccard distance", sub = "")
+pc_uwuf <- plot(dispr_uwuf, main = "Ordination Centroids and Dispersion Labeled:Unweighted unifrac", sub = "")
+pc_aitchison <- plot(dispr_aitchison, main = "Ordination Centroids and Dispersion Labeled:Robust aitchison distance", sub = "")
+pc_philr <- plot(dispr_philr, main = "Ordination Centroids and Dispersion Labeled:PHILR transformed euclidean distance", sub = "")
+dev.off()
+
+```
+
+
+##Assemble boxplot
+
+```{r}
+# Get legend
+legend <- get_legend(bp_jac)
+# Assemble plots
+bps <- plot_grid(
+  bp_jac + theme(legend.position = "none", plot.title = element_blank()), 
+  bp_uwuf + theme(legend.position = "none", plot.title = element_blank()),
+  bp_aitchison + theme(legend.position = "none", plot.title = element_blank()), 
+  bp_philr + theme(legend.position = "none", plot.title = element_blank()),
+  ncol = 2, labels = "AUTO", align = 'vh')
+# Add legend to the assembled plot
+plot_grid(bps, legend, rel_widths = c(6, 1))
+# Export the plot
+ggsave("Figure S9.tiff", width = 10, height = 6,
+       units = "in", dpi = 300, compression = "lzw")
+ggsave("Figure S9.pdf", width = 10, height = 6,
+       units = "in", dpi = 300)
+```
+
+
+
+Acknowldements
+
+Modified from Li et al. (2021).
+
+Li, Y., Bruni, L., Jaramillo-Torres, A., Gajardo, K., Kortner, T.M., Krogdahl, Å., 2021. Differential response of digesta- and mucosa-associated intestinal microbiota to dietary insect meal during the seawater phase of Atlantic salmon. Animal Microbiome. 3, 8. https://doi.org/10.1186/s42523-020-00071-3.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

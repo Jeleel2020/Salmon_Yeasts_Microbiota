@@ -1,0 +1,875 @@
+---
+title: "FON035_microbiota analysis"
+date: April 22, 2021
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Start by Checking Your Current Software Versions
+
+Why do versions matter?
+
+It's good practice to note which versions of both R and the packages within R that you use for your analysis as features and functions may change with updated software versions such that the code no longer works or sometimes such that the output format or even the results change.
+
+
+```{r versions, echo= FALSE}
+getRversion()
+packageVersion("dada2")
+packageVersion("phyloseq")
+packageVersion("ggplot2")
+
+```
+
+## load the required package
+
+```{r loading package, echo=FALSE}
+library(Rcpp)
+library(dada2)
+library(phyloseq)
+library(permute)
+library(lattice)
+library(vegan)
+library(ggplot2)
+```
+
+## In FON035 experiment of Jeleel, the samples were divided into two runs which are equally distributed among the fish sampled from each tank (i.e. 3 fish out of 6 fish sample per tank were included in each run). for this reason the first part of dada2 pipeline will be conducted seperately for each run and thereafter the count.table from each run will be merged before chimera removal.
+
+
+## Set working directory for Run 1 and path to Raw FASTQ file
+```{r working directory, echo=FALSE}
+
+path <- "/net/fs-1/home01/jeag/microbiota/data/Run_1/Data/Intensities/BaseCalls/"
+list.files(path)
+path
+```
+
+
+```{r FR list}
+
+#Forward and reverse fastq filenames have format: SAMPLENAME_R1_001.fastq and SAMPLENAME_R2_001.fastq
+
+LL.fnFs <- sort(list.files(path, pattern="_R1_001.fastq", full.names =TRUE))
+LL.fnRs <- sort(list.files(path, pattern="_R2_001.fastq", full.names =TRUE))
+
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+
+LL.sample.names <- sapply(strsplit(basename(LL.fnFs), "_"), `[`, 1)
+
+```
+
+## Examine the contents of One of the FASTQ files
+
+```{r FASTQfile structure}
+readLines(LL.fnFs[1], n = 12)
+
+```
+
+#Since the DNA sequences in a FASTQ file occur every 4 lines starting with line 2, then we can produce a list of only the DNA sequeces from those 12 first lines of the FASTQ file by using the following code:
+
+```{r FASTQreadSeqs}
+numLines=20
+readLines(LL.fnFs[1], n=numLines)[c(2,6,10)]
+
+```
+
+## List a Specified Number of DNA Sequences from a Specified FASTQ File of Forward Reads
+
+In the code below, you can set the number of lines to read from a FASTQ file as well as the index to indicate the forward read filename in the fnFs object.
+
+```{r readText}
+# Set an object with the number of lines that you want to read from the FASTQ file
+numLines = 40
+
+# Below we will set the forward read filename by using this specified index number in the fnFs filelist object
+FASTQfileIndex = 25
+
+# Print the name of the FASTQ file being explored
+LL.fnFs[FASTQfileIndex]
+
+# Read the above specified number of lines of the FASTQ file
+readLines(LL.fnFs[FASTQfileIndex], n=numLines)[seq(2,numLines,4)]
+```
+
+## Plot a Profile of the Quality Scores for a Forward and a Reverse Read
+
+The quality scores for each sequence in a FASTQ file are used to produce a read quality profile plot. A plot is produced for both the forward and the reverse reads side-by-side for a sample.
+
+Note the following:
+
+* The mean is shown by the solid green line, the median by the solid orange line, and the interquartiles by the dashed orange lines. The grey shading is a heatmap of the frequency of the quality scores at a given position along the read. Darker shading indicates higher frequency.
+* There are a few low quality scores that bring down the mean (the solid green line).
+* Oddly, there are some short sequences that are of low quality that bring down the mean at the beginning of the reads.
+* Note that the quality scores change along the length of the read as well as for the forward vs. the reverse reads. The reverse reads are normally lower quality than the forward reads.
+
+```{r ReadQualityProfilesForward}
+library(dada2)
+
+# This displays the forward and reverse quality scores for the mock community
+plotQualityProfile(c(LL.fnFs[43],LL.fnRs[43]))
+```
+
+# Plot of of forward and reverse reads from four samples
+
+Let's check to see if the forward and reverse reads from 4 samples show a consistent dropoff in quality toward the end of the reads.
+
+```{r ReadQualityProfilesReverse}
+library(dada2)
+plotQualityProfile(LL.fnFs[2:5])
+plotQualityProfile(LL.fnRs[2:5])
+```
+
+
+#Indeed the forward reads did not show a quality dropoff at the end of the read, whereas the reverse reads show a quality drop off such that by about the 230th nucleotide, the mean is below a quality score of 30.
+
+## Create a List of the Filenames (Including the Path) for the Filtered Reads
+
+This filename list will be later used by the filterAndTrim function from DADA2 to write the filtered reads into a new directory called "filtered".
+
+```{r FilteredFilenames}
+# Place filtered files in filtered/subdirectory
+LL.filtFs <- file.path(path, "filtered", paste0(LL.sample.names, "_F_filt.fastq.gz"))
+LL.filtRs <- file.path(path, "filtered", paste0(LL.sample.names, "_R_filt.fastq.gz"))
+```
+
+
+## Filter and Trim the Reads in Each FASTQ File
+
+The filterAndTrim function of DADA2 is the quality control step of the pipeline. It takes as input the forward and reverse reads, and writes a reduced set of sequences in FASTQ format that excludes low quality sequences which do not meet the criteria specified by the function arguments. Below, we truncate the reverse reads after the 230th nucleotide. The maxEE sets the maximum expected errors in a sequence to 4 for both the forward and reverse sequences, and rm.phix removes any phiX DNA sequences. The trimLeft argument trims 17 bases corresponding to the length of the Takahashi et al. Pro341f primer from the beginning of the forward reads, and trims the 21 bases of the Takahashi et al. Pro785r reverse primer from the beginning of the reverse reads. The 2 primer sequences are as follows:
+
+* Pro341F (5’-CCTACGGGNGGCWGCAG-3’) - 17 nucleotides
+* Pro785R (5’-GACTACHVGGGTATCTAATCC-3’) - 21 nucleotides
+
+```{r FilterAndTrim}
+library(dada2)
+LL.FiltOut <- filterAndTrim(LL.fnFs, LL.filtFs, LL.fnRs, LL.filtRs, truncLen=c(300,230),
+              maxN=0, maxEE=c(4,4), truncQ=2, rm.phix=TRUE, trimLeft = c(17,21),
+              compress=TRUE, multithread=FALSE) # On Windows set multithread=FALSE
+head(LL.FiltOut)
+```
+
+
+## Learn the Error Rates for Forward and Reverse Reads
+
+This step applies machine learning to develop a model of the error rate for forward and reverse reads. It is specific to this particular sequencing run. Thus, one should NOT develop this error model for samples from different sequencing. If multiple runs are to be analyzed, then the DADA2 pipeline should be run separately for each sequencing run, and then the sequence variant tables may be merged.
+
+This step can take hours to run.
+
+```{r ErrorTraining}
+LL.errF <- learnErrors(LL.filtFs, multithread=FALSE)
+LL.errR <- learnErrors(LL.filtRs, multithread=FALSE)
+```
+
+## Plot the Estimated Error Rates for the Transition Types
+
+The nucleotide transition error rates will be unique to each run.
+
+```{r PlotErrorRates}
+plotErrors(LL.errF, nominalQ=TRUE)
+plotErrors(LL.errR, nominalQ=TRUE)
+```
+
+## Dereplication
+
+There will be many sequences which are 100% identical. By identifying the sequences which are identical, a process called "dereplication", the size of the dataset may be reduced.
+
+```{r Dereplication}
+
+# Dereplicate the forward and then the reverse reads
+LL.derepFs <- derepFastq(LL.filtFs, verbose=TRUE)
+LL.derepRs <- derepFastq(LL.filtRs, verbose=TRUE)
+
+# Name the derep-class objects by the sample names
+names(LL.derepFs) <- LL.sample.names
+names(LL.derepRs) <- LL.sample.names
+```
+
+# Make a rank-abundance curve from the "uniques" element in the the dereplicated object for sample M1
+
+Note that the "uniques" in the dereplicated object do not yet have the error sequences removed. This will happen in the next step.
+
+```{r RankAbundanceCurve}
+plot(LL.derepFs$M1$uniques)
+plot(LL.derepRs$M1$uniques)
+```
+
+## Sample Inference
+
+At this step we run the principle function of the DADA2 pipeline. The dada function uses the error model along with the set of dereplicated sequences in order to identify which sequences are likely to be real biological sequences and which are likely the result of base-calling errors. Those sequences that are base-calling errors are clustered with the real biological sequence from which they are likely to have derived.
+
+```{r SampleInference}
+LL.dadaFs <- dada(LL.derepFs, err=LL.errF, multithread=FALSE)
+LL.dadaRs <- dada(LL.derepRs, err=LL.errR, multithread=FALSE)
+LL.dadaFs[[1]]
+LL.dadaRs[[1]]
+```
+## Merge Paired Reads
+
+The forward and reverse reads are now 300 and 230 nucleotides in length, respectively. The amplicon generated by the Takahashi et al. primers should be about 465 + 17 + 21 = 503 nucleotides in length. Given that the combined length of the forward and reverse reads is 530 nucleotides, then there should be 30 nucleotides of overlap at the ends of the reads therby allowing for them to be merged into a single amplicon sequence. Hence, the mergePairs function merges the forward and reverse reads to generate a single contiguous 16S amplicon sequence.
+
+```{r MergeReads}
+LL.mergers <- mergePairs(LL.dadaFs, LL.derepFs, LL.dadaRs, LL.derepRs, verbose=TRUE)
+# Inspect the merger data.frame from the first sample
+head(LL.mergers[[1]])
+```
+
+
+## Make the Amplicon Sequence Variant (ASV) Table
+
+Note that DADA2 produces Amplicon Sequence Variants (ASVs), not OTUs. Hence, here we produce not an OTU table but rather an ASV table.
+
+Note that there are 97 samples 35,501 ASVs in this table. The 97th "sample" is actually derived from an additional FASTQ file output by the Illumina machine. The FASTQ file is named "undetermined" and includes sequences for which an index could not be matched. This file should be removed prior to certain analyses, or perhaps even before starting the pipeline. We will retain it here so that we can examine the sequences within it.
+
+```{r}
+LL.seqtab <- makeSequenceTable(LL.mergers)
+
+# This produces the dimensions of the table, with the rows as samples and columns as ASVs.
+dim(LL.seqtab)
+
+# Inspect distribution of sequence lengths
+table(nchar(getSequences(LL.seqtab)))
+
+# How are the rows named?
+rownames(LL.seqtab)[1]
+
+# How are the columns named?
+colnames(LL.seqtab)[1]
+```
+
+
+##Save the LL.seqtab (the ASV table from first run) into seqtab1. rds
+
+```{r}
+saveRDS(LL.seqtab, file="seqtab1.rds") # First table
+st1 <- readRDS("seqtab1.rds")
+
+```
+
+
+
+## Set working directory for Run 2 and path to Raw FASTQ file
+```{r working directory, echo=FALSE}
+
+path1 <- "/net/fs-1/home01/jeag/microbiota/data/Run_2/Intensities/BaseCalls/"
+list.files(path1)
+path1
+```
+
+
+```{r FR list}
+
+#Forward and reverse fastq filenames have format: SAMPLENAME_R1_001.fastq and SAMPLENAME_R2_001.fastq
+
+LL.fnFs1 <- sort(list.files(path1, pattern="_R1_001.fastq", full.names =TRUE))
+LL.fnRs1 <- sort(list.files(path1, pattern="_R2_001.fastq", full.names =TRUE))
+
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+
+LL.sample.names1 <- sapply(strsplit(basename(LL.fnFs1), "_"), `[`, 1)
+
+```
+
+## Examine the contents of One of the FASTQ files
+
+```{r FASTQfile structure}
+readLines(LL.fnFs1[1], n = 12)
+
+```
+
+#Since the DNA sequences in a FASTQ file occur every 4 lines starting with line 2, then we can produce a list of only the DNA sequeces from those 12 first lines of the FASTQ file by using the following code:
+
+```{r FASTQreadSeqs}
+numLines=20
+readLines(LL.fnFs1[1], n=numLines)[c(2,6,10)]
+
+```
+
+## List a Specified Number of DNA Sequences from a Specified FASTQ File of Forward Reads
+
+In the code below, you can set the number of lines to read from a FASTQ file as well as the index to indicate the forward read filename in the fnFs object.
+
+```{r readText}
+# Set an object with the number of lines that you want to read from the FASTQ file
+numLines = 40
+
+# Below we will set the forward read filename by using this specified index number in the fnFs filelist object
+FASTQfileIndex = 25
+
+# Print the name of the FASTQ file being explored
+LL.fnFs1[FASTQfileIndex]
+
+# Read the above specified number of lines of the FASTQ file
+readLines(LL.fnFs1[FASTQfileIndex], n=numLines)[seq(2,numLines,4)]
+```
+
+## Plot a Profile of the Quality Scores for a Forward and a Reverse Read
+
+The quality scores for each sequence in a FASTQ file are used to produce a read quality profile plot. A plot is produced for both the forward and the reverse reads side-by-side for a sample.
+
+Note the following:
+
+* The mean is shown by the solid green line, the median by the solid orange line, and the interquartiles by the dashed orange lines. The grey shading is a heatmap of the frequency of the quality scores at a given position along the read. Darker shading indicates higher frequency.
+* There are a few low quality scores that bring down the mean (the solid green line).
+* Oddly, there are some short sequences that are of low quality that bring down the mean at the beginning of the reads.
+* Note that the quality scores change along the length of the read as well as for the forward vs. the reverse reads. The reverse reads are normally lower quality than the forward reads.
+
+```{r ReadQualityProfilesForward}
+library(dada2)
+
+# This displays the forward and reverse quality scores for the mock community
+plotQualityProfile(c(LL.fnFs1[43],LL.fnRs1[43]))
+```
+
+# Plot of of forward and reverse reads from four samples
+
+Let's check to see if the forward and reverse reads from 4 samples show a consistent dropoff in quality toward the end of the reads.
+
+```{r ReadQualityProfilesReverse}
+library(dada2)
+plotQualityProfile(LL.fnFs1[2:5])
+plotQualityProfile(LL.fnRs1[2:5])
+```
+
+
+#Indeed the forward reads did not show a quality dropoff at the end of the read, whereas the reverse reads show a quality drop off such that by about the 230th nucleotide, the mean is below a quality score of 30.
+
+## Create a List of the Filenames (Including the Path) for the Filtered Reads
+
+This filename list will be later used by the filterAndTrim function from DADA2 to write the filtered reads into a new directory called "filtered".
+
+```{r FilteredFilenames}
+# Place filtered files in filtered/subdirectory
+LL.filtFs1 <- file.path(path1, "filtered", paste0(LL.sample.names1, "_F_filt.fastq.gz"))
+LL.filtRs1 <- file.path(path1, "filtered", paste0(LL.sample.names1, "_R_filt.fastq.gz"))
+```
+
+
+## Filter and Trim the Reads in Each FASTQ File
+
+The filterAndTrim function of DADA2 is the quality control step of the pipeline. It takes as input the forward and reverse reads, and writes a reduced set of sequences in FASTQ format that excludes low quality sequences which do not meet the criteria specified by the function arguments. Below, we truncate the reverse reads after the 230th nucleotide. The maxEE sets the maximum expected errors in a sequence to 4 for both the forward and reverse sequences, and rm.phix removes any phiX DNA sequences. The trimLeft argument trims 17 bases corresponding to the length of the Takahashi et al. Pro341f primer from the beginning of the forward reads, and trims the 21 bases of the Takahashi et al. Pro785r reverse primer from the beginning of the reverse reads. The 2 primer sequences are as follows:
+
+* Pro341F (5’-CCTACGGGNGGCWGCAG-3’) - 17 nucleotides
+* Pro785R (5’-GACTACHVGGGTATCTAATCC-3’) - 21 nucleotides
+
+```{r FilterAndTrim}
+library(dada2)
+LL.FiltOut <- filterAndTrim(LL.fnFs1, LL.filtFs1, LL.fnRs1, LL.filtRs1, truncLen=c(300,230),
+              maxN=0, maxEE=c(4,4), truncQ=2, rm.phix=TRUE, trimLeft = c(17,21),
+              compress=TRUE, multithread=FALSE) # On Windows set multithread=FALSE
+
+head(LL.FiltOut)
+
+```
+
+
+## Learn the Error Rates for Forward and Reverse Reads
+
+This step applies machine learning to develop a model of the error rate for forward and reverse reads. It is specific to this particular sequencing run. Thus, one should NOT develop this error model for samples from different sequencing. If multiple runs are to be analyzed, then the DADA2 pipeline should be run separately for each sequencing run, and then the sequence variant tables may be merged.
+
+This step can take hours to run.
+
+```{r ErrorTraining}
+LL.errF1 <- learnErrors(LL.filtFs1, multithread=FALSE)
+LL.errR1 <- learnErrors(LL.filtRs1, multithread=FALSE)
+```
+
+## Plot the Estimated Error Rates for the Transition Types
+
+The nucleotide transition error rates will be unique to each run.
+
+```{r PlotErrorRates}
+plotErrors(LL.errF1, nominalQ=TRUE)
+plotErrors(LL.errR1, nominalQ=TRUE)
+```
+
+## Dereplication
+
+There will be many sequences which are 100% identical. By identifying the sequences which are identical, a process called "dereplication", the size of the dataset may be reduced.
+
+```{r Dereplication}
+
+# Dereplicate the forward and then the reverse reads
+LL.derepFs1 <- derepFastq(LL.filtFs1, verbose=TRUE)
+LL.derepRs1 <- derepFastq(LL.filtRs1, verbose=TRUE)
+
+# Name the derep-class objects by the sample names
+names(LL.derepFs1) <- LL.sample.names1
+names(LL.derepRs1) <- LL.sample.names1
+```
+
+# Make a rank-abundance curve from the "uniques" element in the the dereplicated object for sample M1
+
+Note that the "uniques" in the dereplicated object do not yet have the error sequences removed. This will happen in the next step.
+
+```{r RankAbundanceCurve}
+plot(LL.derepFs1$S1$uniques)
+plot(LL.derepRs1$S1$uniques)
+```
+
+## Sample Inference
+
+At this step we run the principle function of the DADA2 pipeline. The dada function uses the error model along with the set of dereplicated sequences in order to identify which sequences are likely to be real biological sequences and which are likely the result of base-calling errors. Those sequences that are base-calling errors are clustered with the real biological sequence from which they are likely to have derived.
+
+```{r SampleInference}
+LL.dadaFs1 <- dada(LL.derepFs1, err=LL.errF1, multithread=FALSE)
+LL.dadaRs1 <- dada(LL.derepRs1, err=LL.errR1, multithread=FALSE)
+LL.dadaFs1[[1]]
+LL.dadaRs1[[1]]
+```
+## Merge Paired Reads
+
+The forward and reverse reads are now 300 and 230 nucleotides in length, respectively. The amplicon generated by the Takahashi et al. primers should be about 465 + 17 + 21 = 503 nucleotides in length. Given that the combined length of the forward and reverse reads is 530 nucleotides, then there should be 30 nucleotides of overlap at the ends of the reads therby allowing for them to be merged into a single amplicon sequence. Hence, the mergePairs function merges the forward and reverse reads to generate a single contiguous 16S amplicon sequence.
+
+```{r MergeReads}
+LL.mergers1 <- mergePairs(LL.dadaFs1, LL.derepFs1, LL.dadaRs1, LL.derepRs1, verbose=TRUE)
+# Inspect the merger data.frame from the first sample
+head(LL.mergers1[[1]])
+```
+
+
+## Make the Amplicon Sequence Variant (ASV) Table
+
+Note that DADA2 produces Amplicon Sequence Variants (ASVs), not OTUs. Hence, here we produce not an OTU table but rather an ASV table.
+
+Note that there are 97 samples 35,501 ASVs in this table. The 97th "sample" is actually derived from an additional FASTQ file output by the Illumina machine. The FASTQ file is named "undetermined" and includes sequences for which an index could not be matched. This file should be removed prior to certain analyses, or perhaps even before starting the pipeline. We will retain it here so that we can examine the sequences within it.
+
+```{r}
+LL.seqtab1 <- makeSequenceTable(LL.mergers1)
+
+# This produces the dimensions of the table, with the rows as samples and columns as ASVs.
+dim(LL.seqtab1)
+
+# Inspect distribution of sequence lengths
+table(nchar(getSequences(LL.seqtab1)))
+
+# How are the rows named?
+rownames(LL.seqtab1)[1]
+
+# How are the columns named?
+colnames(LL.seqtab1)[1]
+```
+
+
+##Save the LL.seqtab1 (the ASV table from first run) into seqtab2. rds
+
+```{r}
+saveRDS(LL.seqtab1, file="seqtab2.rds") # second table
+st2 <- readRDS("seqtab2.rds")
+
+```
+
+
+##starting from where I left by reading out the sequencing tables generated from each run
+
+```{r}
+library(Rcpp)
+library(dada2)
+packageVersion("dada2")
+st1 <- readRDS("seqtab1.rds")
+##st1
+st2 <- readRDS("seqtab2.rds")
+##st2
+table(nchar(getSequences(st1)))
+dim(st1)
+```
+
+
+##Merge ASV tables from each run into one table
+
+```{r}
+st.all <- mergeSequenceTables(st1, st2, repeats = "sum")
+```
+
+
+## Remove Chimeras from the ASV Table
+
+Chimeras occur when primer extentions truncated during a PCR cycle anneal to mismatched 16S template from another taxon and prime the extension of the truncated fragment to create a chimeric sequence consisting of partial 16S sequence from 1 taxon attached to 16S from a different taxon. These chimeric sequences thus do not represent real biological sequences and must be removed.
+
+```{r RemoveChimeras}
+LLSeqtab.nochim <- removeBimeraDenovo(st.all, method="consensus", multithread=FALSE, verbose=TRUE)
+
+# This lists the dimensions of the ASV table following chimera removal. It is the number of samples X number of ASVs.
+dim(LLSeqtab.nochim)
+
+# The sum function sums the sequence counts from each combination of ASV and sample. Thus, it gives the number of sequences in each table.
+sum(LLSeqtab.nochim)/sum(st.all)
+saveRDS(LLSeqtab.nochim, file="seqtab.nochim.rds") # third table
+```
+
+The new table is reduced from 25132 ASVs to just 13900 ASVs. However, although only 50% of the ASVs remain after chimera removal, the number of sequences in the non-chimerica ASV table is 98% of the original table. Thus, the chimeric ASVs that were removed were generally low abundance as would be expected for chimera.
+
+## Track Reads Through the Pipeline
+
+This produces a summary table indicating the number of sequences that remain at each step of the pipeline. The table is also written to comma separate values, or .csv, file which may be opened in a spreadsheet.
+
+
+
+## Assign Taxonomy
+
+This step determines the taxonomy of each ASV. Different reference databases may be used, and there are several formatted for use with DADA2 and available at <https://benjjneb.github.io/dada2/training.html>[link](https://benjjneb.github.io/dada2/training.html). Here we use the latest version of the Silva database. Note that there are entries in Silva which do not conform to 7 hierarchy levels. Also note that identifical down to the species level requires a separate reference file and algorithm.
+
+Note that this step takes a while, and that on a computer with just 16GB of RAM and 16GB of swap space, RStudio crashed when both RAM + swap space were exceeded during the addSpecies function.
+
+On Windows, analysis of Daniel's dataset ran out of memory at the addSpecies() step and gave the error "Error: cannot allocate vector of size 943.6 Mb". Looking over the data objects in memory, the LL.derepFs and LL.derepRs objects take up about 9 Gb each, and they are not needed following the production of the LL.dadaFs and LL.dadaRs objects. Hence, they were cleared out of memory in order for the taxonomy assignment to proceeed. RStudio was a bit sluggish to respond, but eventually unfroze after about 5 minutes.
+
+```{r AddTaxonomy}
+
+LL.taxa <- assignTaxonomy(LLSeqtab.nochim, paste0("/net/fs-1/home01/jeag/microbiota/Taxonomy/silva_nr99_v138.1_train_set.fa.gz"), multithread=FALSE)
+
+# A separate approach is needed for assigning species designations
+LL.taxa <- addSpecies(LL.taxa, paste0("/net/fs-1/home01/jeag/microbiota/Taxonomy/silva_species_assignment_v138.1.fa.gz"))
+LL.taxa
+# Inspect the taxa names
+taxa.print <- LL.taxa # Removing sequence rownames for display only
+rownames(taxa.print) <- NULL
+head(taxa.print) 
+saveRDS(LL.taxa, file="seqtab.taxa.rds") # fourth table
+```
+
+##Read saved rds file into LLSeqtab.nochim and LL.taxa to start all over from here
+
+```{r}
+LLSeqtab.nochim <- readRDS("seqtab.nochim.rds")
+LL.taxa <- readRDS("seqtab.taxa.rds")
+```
+
+##Removing chroloroplast or mitochondria from the ASVs table
+
+```{r}
+dim(LLSeqtab.nochim)
+dim(LL.taxa)
+##Removing chloroplast from the ASVs table
+is.chloro <- LL.taxa[,"Order"] %in% "Chloroplast"
+setab.nochloro <- LLSeqtab.nochim[,!is.chloro]
+dim(setab.nochloro)
+taxa.nochloro <- LL.taxa[!is.chloro,]
+dim(taxa.nochloro)
+##Removing mitochondria from the ASVs table
+is.mitochon <- taxa.nochloro[,"Family"] %in% "Mitochondria"
+setab.mitochon <- setab.nochloro[,!is.mitochon ]
+dim(setab.mitochon)
+taxa.nomito <- taxa.nochloro[!is.mitochon,]
+dim(taxa.nomito)
+
+##save setab.mitochon and taxa.nomito into rds file
+saveRDS(setab.mitochon, file="setab.mitochon.rds")
+saveRDS(taxa.nomito, file="taxa.nomito.rds")
+
+```
+
+##Read setab.mitochon and taxa.nomito to commence again
+```{r}
+setab.mitochon <- readRDS("setab.mitochon.rds")
+taxa.nomito <- readRDS("taxa.nomito.rds")
+```
+
+## Evaluating the DADA2 Performance with the Mock Community
+
+A mock community sample in which a mixture of 8 known sequence was included, then it may be evaluated with this code. We did not include one in this run, so the code is not run. The mock samples are M48 in run 1 and S48 in run 2. We will check the accuracy of these two samples using the code below
+
+### Determine the number of Amplicon Sequence Variants (ASVs) present in the mock sample1
+
+```{r MockAnalysis}
+
+LL.unqs.mock <- setab.mitochon[43,]
+LL.unqs.mock <- sort(LL.unqs.mock[LL.unqs.mock>0], decreasing=TRUE) # Drop ASVs absent in the Mock
+cat("DADA2 inferred", length(LL.unqs.mock), "sample sequences present in the Mock community.\n")
+```
+
+### Determine the number of sequences obtained from the mock sample1 that match the reference sequences in the original mock community
+
+```{r}
+path3 <- "/net/fs-1/home01/jeag/microbiota"
+LL.mock.ref <- getSequences(file.path(path3, "ZymoBIOMICS_standard.fasta"))
+LL.match.ref <- sum(sapply(names(LL.unqs.mock), function(x) any(grepl(x, LL.mock.ref))))
+cat("Of those,", sum(LL.match.ref), "were exact matches to the expected reference sequences.\n")
+```
+
+### Determine the number of Amplicon Sequence Variants (ASVs) present in the mock sample2
+
+```{r MockAnalysis}
+
+LL.unqs.mock1 <- setab.mitochon[109,]
+LL.unqs.mock1 <- sort(LL.unqs.mock1[LL.unqs.mock1>0], decreasing=TRUE) # Drop ASVs absent in the Mock
+cat("DADA2 inferred", length(LL.unqs.mock1), "sample sequences present in the Mock community.\n")
+```
+
+### Determine the number of sequences obtained from the mock sample1 that match the reference sequences in the original mock community
+
+```{r}
+path3 <- "/net/fs-1/home01/jeag/microbiota"
+LL.mock.ref <- getSequences(file.path(path3, "ZymoBIOMICS_standard.fasta"))
+LL.match.ref <- sum(sapply(names(LL.unqs.mock1), function(x) any(grepl(x, LL.mock.ref))))
+cat("Of those,", sum(LL.match.ref), "were exact matches to the expected reference sequences.\n")
+```
+
+##Creating a phyloseq object
+A phyloseq object consists of the 5 main data types needed for complete microbiome analysis. Once the 5 data types are merged into one phyloseq class object, then transformations on the phyloseq object propagate to all the data types within it. The 5 data types are:
+
+(@) An OTU or ASV table like the one produced, for instance, by the DADA2 pipeline
+(@) The sample metadata table (containing, for example, process parameters like pH, COD, etc.)
+(@) A reference nucleotide sequence for each OTU or ASV
+(@) A phylogenetic tree
+(@) A taxonomy table with the levels of the taxonomic hierarchy for every OTU or ASV
+
+```{r}
+library(phyloseq); packageVersion("phyloseq")
+library(ggplot2); packageVersion("ggplot2")
+theme_set(theme_bw())
+
+```
+
+## Import and Format a Sample Metadata Table
+
+The sample metadata table is generally produced in a spreadsheet program, then saved as a comma separated values file and imported into R.
+
+```{r metadata}
+
+LL.samdf<-read.csv("/net/fs-1/home01/jeag/microbiota/data/Run_1/Meta_data_full.csv", TRUE, quote = "", comment.char = "",  row.names = 1, dec = ",")
+class(LL.samdf)
+head(LL.samdf)
+LL.samdf
+
+```
+
+## Make a Phyloseq Object from an OTU/SV Table, Sample Metadata, and Taxonomy
+
+What does the phyloseq function do?
+What does the object that it creates, called "ps", contain?
+What is the structure of the component objects of "ps"?
+How many levels does the taxonomy table have? Could the number of levels change according to the reference taxonomy used?
+What are row names in the taxonomy table? How about in the OTU/SV table and in the sample data? Try typing the command 
+
+rownames(LL.ps@sam_data)
+
+" for example.
+
+One advantage to working with a phyloseq object is that changes made to the object (e.g. removing a sample), propagate through all the components of the phyloseq object.
+
+
+```{r MakePSObject}
+library(phyloseq)
+library(Biostrings)
+# Create the phyloseq object. Note that if the sample metadata table doesn't have a sample named "undetermined", then it gets lost from the phyloseq object.
+
+LL.ps <- phyloseq(otu_table(setab.mitochon, taxa_are_rows=FALSE), 
+               sample_data(LL.samdf), 
+               tax_table(taxa.nomito))
+
+LL.ps <- prune_samples(sample_names(LL.ps) != "Undetermined", LL.ps) # Remove undetermined sample
+
+# Examine the object contents
+LL.ps
+
+##Remove ASVs that had no phylum assignment
+ps <- subset_taxa(LL.ps, Phylum != "unassigned")
+ps
+
+# The taxa names are the actual ASV sequences, and this makes for messy displays
+# We can rename the taxa to something human-friendly, and copy the ASV sequences to the reference sequence slot of the phyloseq object
+LL.newnames <- paste0("ASV", seq(ntaxa(ps))) # Define new names ASV1, ASV2, ...
+LL.seqs <- taxa_names(ps) # Store sequences
+names(LL.seqs) <- LL.newnames # Make map from ASV1 to full sequence
+taxa_names(ps) <- LL.newnames # Rename to human-friendly format
+
+# Do the names of the sequences in the phyloseq object match all those in the sequence list?
+intersect(names(LL.seqs), taxa_names(ps))
+
+# Merge the reference seqeunces into the phyloseq object
+ps<-merge_phyloseq(ps, DNAStringSet(LL.seqs))
+
+# Does the newly merged phyloseq object now contain the reference sequences?
+ps
+
+# What does one of the reference sequences look like?
+refseq(ps)[1]
+refseq(ps)[2]
+refseq(ps)[22]
+# Are the taxa newly renamed to a human-friendly format?
+
+taxa_names(ps)[1]
+taxa_names(ps)[2:5]
+
+# Spot check metadata for a sample
+ps@sam_data[1:10,]
+
+
+```
+
+
+##exploring phyloseq object
+
+```{r}
+ps
+ntaxa(ps)
+nsamples(ps)
+sample_names(ps)[1:5]
+rank_names(ps)
+sample_variables(ps)
+otu_table(ps)[1:10,1:10]
+tax_table(ps)[1:5,1:7]
+taxa_names(ps)[1:10]
+```
+
+##Identify contaminants in the sample using decontam
+
+```{r}
+library(decontam)
+packageVersion("decontam")
+ps
+head(sample_data(ps))
+##Inspect library sizes
+df <- as.data.frame(sample_data(ps)) # Put sample_data into a ggplot-friendly data.frame
+df$LibrarySize <- sample_sums(ps)
+df <- df[order(df$LibrarySize),]
+df$Index <- seq(nrow(df))
+ggplot(data=df, aes(x=Index, y=LibrarySize, color=Sample_kind)) + geom_point()
+
+##identify contaminants - frequency
+contamdf.freq <- isContaminant(ps, method="frequency", conc="quant_reading", threshold = 0.1)
+summary(sample_sums(ps))
+summary(taxa_sums(ps))
+head(contamdf.freq)
+contamdf.freq
+table(contamdf.freq$contaminant)
+head(which(contamdf.freq$contaminant))
+
+##Let’s take a look at what a clear non-contaminant (the 1st ASV), and a clear contaminant (the 29th ASV), look like:
+plot_frequency(ps, taxa_names(ps)[c(1,29)], conc="quant_reading") + 
+  xlab("DNA Concentration (Qubit fluorometer intensity)")
+
+##Let’s inspect a couple more of the ASVs that were classified as contaminants to ensure they look like what we expect:
+set.seed(100)
+plot_frequency(ps, taxa_names(ps)[sample(which(contamdf.freq$contaminant),10)], conc="quant_reading") +
+    xlab("DNA Concentration (Qubit fluorometer intensity)")
+
+##Now let's check our likely contaminants::
+ps
+ps.contam <- prune_taxa(contamdf.freq$contaminant, ps)
+ps.contam
+tax_table(ps.contam)
+
+##Now that we have identified likely contaminants, let’s remove them from the phyloseq object:
+ps.noncontam <- prune_taxa(!contamdf.freq$contaminant, ps)
+ps.noncontam
+tax_table(ps.noncontam)[1:5, 1:7]
+ps.noncontam
+```
+
+```{r}
+##Remove taxa not seen more than 1 times in at least 20% of the samples. This protects against an OTU with small mean & trivially large C.V.
+library(dplyr)
+ps.noncontam1 <- transform_sample_counts(ps.noncontam, function(x){x / sum(x)})
+ps.noncontam1 <- subset_samples(ps.noncontam, !Sample_kind %in% c("Negative_control")) %>%
+  # remove features present in only one sample
+  filter_taxa(., function(x) sum(x > 0) > 1, TRUE) %>%
+  taxa_names() %>%
+  prune_taxa(ps.noncontam1)
+
+##OR
+
+ps.noncontam2 = filter_taxa(ps.noncontam, function(x) sum(x > 0) > 1, TRUE)
+ps.noncontam2
+
+ps.noncontam3 = filter_taxa(ps.noncontam, function(x) sum(x > 1) > (0.05*length(x)), TRUE)
+ps.noncontam3
+```
+
+##Save ASVs table from phyloseq object into excel file
+```{r}
+OTU1 = as(otu_table(ps.noncontam2), "matrix")
+# transpose if necessary
+if(taxa_are_rows(ps.noncontam2)){OTU1 <- t(OTU1)}
+# Coerce to data.frame
+OTUdf = as.data.frame(OTU1)
+library("xlsx")
+openxlsx::write.xlsx(OTUdf, file = "data.name3.xlsx")
+```
+
+## Plot Alpha Diversity Measures
+
+There are a multitude of alpha diversity metric available.
+
+```{r AlphaDiversity}
+##All the parameters in the metadata
+plot_richness(ps, x="Diet", measures=c("Shannon", "Simpson"), color="Sample_type", sortby = "Diet")
+plot_richness(ps.noncontam1, x="Diet", measures=c("Shannon", "Simpson"), color="Diet")
+##subset Digesta only
+LL.psNoCM <-subset_samples(ps.noncontam3, Sample_type =="Digesta")
+LL.psNoCM
+plot_richness(LL.psNoCM, x="Diet", measures=c("Shannon", "Simpson"), color="Diet")
+##subset feed only
+LL.psNoCM1 <-subset_samples(LL.ps, Sample_type =="Feed")
+LL.psNoCM1
+plot_richness(LL.psNoCM1, x="Diet", measures=c("Shannon", "Simpson"), color="Diet")
+##subset water only
+LL.psNoCM2 <-subset_samples(LL.ps, Sample_type =="water")
+LL.psNoCM2
+plot_richness(LL.psNoCM2, x="Diet", measures=c("Shannon", "Simpson"), color="Diet")
+##subset control only
+LL.psNoCM3 <-subset_samples(LL.ps, Sample_type =="control")
+LL.psNoCM3
+plot_richness(LL.psNoCM3, x="Diet", measures=c("Shannon", "Simpson"), color="Diet")
+```
+
+##Ordinate
+```{r}
+##for all the data
+# Transform data to proportions as appropriate for Bray-Curtis distances
+ps.prop <- transform_sample_counts(ps, function(otu) otu/sum(otu))
+ord.nmds.bray <- ordinate(ps.prop, method="NMDS", distance="bray")
+plot_ordination(ps.prop, ord.nmds.bray, color="Diet", title="Bray NMDS")
+
+##for Digesta only
+ps.prop1 <- transform_sample_counts(LL.psNoCM, function(otu) otu/sum(otu))
+ord.nmds.bray1 <- ordinate(ps.prop1, method="MDS", distance="bray")
+plot_ordination(ps.prop1, ord.nmds.bray, color="Diet", title="Bray MDS")
+
+##for feed only
+ps.prop2 <- transform_sample_counts(LL.psNoCM1, function(otu) otu/sum(otu))
+ord.nmds.bray2 <- ordinate(ps.prop2, method="NMDS", distance="bray")
+plot_ordination(ps.prop2, ord.nmds.bray, color="Diet", title="Bray NMDS")
+
+##for water only
+ps.prop3 <- transform_sample_counts(LL.psNoCM2, function(otu) otu/sum(otu))
+ord.nmds.bray3 <- ordinate(ps.prop3, method="NMDS", distance="bray")
+plot_ordination(ps.prop3, ord.nmds.bray, color="Diet", title="Bray NMDS")
+
+##for water only
+ps.prop4 <- transform_sample_counts(LL.psNoCM3, function(otu) otu/sum(otu))
+ord.nmds.bray4 <- ordinate(ps.prop4, method="NMDS", distance="bray")
+plot_ordination(ps.prop4, ord.nmds.bray, color="Diet", title="Bray NMDS")
+
+
+```
+
+##Stacked Barplot for all the digesta
+```{r}
+top1000 <- names(sort(taxa_sums(LL.psNoCM), decreasing=TRUE))[1:1000]
+ps.top20 <- transform_sample_counts(LL.psNoCM, function(OTU) OTU/sum(OTU))
+ps.top20 <- prune_taxa(top1000, ps.top20)
+plot_bar(ps.top20, x="Diet", fill="Phylum") + facet_wrap(~Diet, scales="free_x")
+
+top20 <- names(sort(taxa_sums(LL.psNoCM), decreasing=TRUE))[1:1000]
+ps.top20 <- transform_sample_counts(LL.psNoCM, function(OTU) OTU/sum(OTU))
+ps.top20 <- prune_taxa(top20, ps.top20)
+plot_bar(ps.top20, x="Diet", fill="Phylum") + facet_wrap(~Sample_type, scales="free_x")
+
+top20 <- names(sort(taxa_sums(LL.psNoCM), decreasing=TRUE))[1:20]
+ps.top20 <- transform_sample_counts(LL.psNoCM, function(OTU) OTU/sum(OTU))
+ps.top20 <- prune_taxa(top20, ps.top20)
+plot_bar(ps.top20, x="Diet", fill="Genus") + facet_wrap(~Sample_type, scales="free_x")
+```
+
+
+
+
+
+
+
+
+
+
