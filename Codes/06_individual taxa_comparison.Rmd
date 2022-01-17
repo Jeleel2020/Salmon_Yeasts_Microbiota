@@ -9,6 +9,7 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+##Load the required packages
 ```{r}
 
 library(tidyverse)
@@ -59,7 +60,7 @@ set.seed(1910)
 library(ggpubr)
 ```
 
-
+##Set the working driectory and read the saved phyloseq object
 ```{r}
 setwd ("/net/fs-1/home01/jeag/")
 
@@ -192,16 +193,16 @@ taxa_boxplot_digesta <- filter(taxa_tab1, Sample_type == "Digesta") %>%
         legend.position = "none") 
 
 # Export the plot
-ggsave("Figure S7.tiff", width = 10, height = 6,
+ggsave("Figure 3.tiff", width = 10, height = 6,
        units = "in", dpi = 300, compression = "lzw")
-ggsave("Figure S7.pdf", width = 10, height = 6,
+ggsave("Figure 3.pdf", width = 10, height = 6,
        units = "in", dpi = 300)
 
 
 ```
 
 
-### Boxplot to abundance of individual dominant taxa in the feed samples grouped by diets
+## Boxplot to abundance of individual dominant taxa in the feed samples grouped by diets
 ```{r, fig.width=10}
 # define color scheme
 col <- c("grey", brewer.pal(n = 10, name = "Paired"))
@@ -234,7 +235,7 @@ ggsave("Figure S13.pdf", width = 11, height = 6,
 ```
 
 
-### Boxplot to abundance of individual dominant taxa in the water samples grouped by diets
+## Boxplot to abundance of individual dominant taxa in the water samples grouped by diets
 ```{r, fig.width=10}
 # define color scheme
 col <- c("grey", brewer.pal(n = 10, name = "Paired"))
@@ -324,7 +325,7 @@ taxa_o <- taxa_tab2 %>%
 ```
 
 
-Test the diet effect on individual taxonomy - Kruska-walis test
+##Test the diet effect on individual taxonomy - Kruska-walis test
 
 ```{r}
 ##Statistics for Pediococcus
@@ -364,8 +365,8 @@ kruskal.test(Abundance ~ Diet, data = taxa_o)
 
 
 
-Pair-wise comparison
-The P-values for all the individual taxonomy, excpet Alliivibrio were less than 0.0001. Thus, we proceed to use wilcox pairwise comparison to identify differences between diets.
+##Pair-wise comparison
+##The P-values for all the individual taxonomy, excpet Alliivibrio were less than 0.0001. Thus, we proceed to use wilcox pairwise comparison to identify differences between diets.
 
 ```{r}
 ##Statistics for Pediococcus
@@ -438,10 +439,6 @@ openxlsx::write.xlsx(wilcox14, file = "Wilcox pairwise comparison_Limosilactobac
 openxlsx::write.xlsx(wilcox15, file = "Wilcox pairwise comparison_Others.xlsx")
 
 ```
-
-
-
-
 
 ```{r}
 taxa_digesta <- filter(taxa_tab1, Sample_type == "Digesta")
