@@ -9,7 +9,7 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-Load the required packages
+##Load the required packages
 ```{r}
 library(Rcpp)
 library(dada2)
@@ -50,7 +50,7 @@ packageVersion("picante")
 
 ```
 
-Read the previously saved phyloseq object and extract the count table, tax table and metadata
+##Read the previously saved phyloseq object and extract the count table, tax table and metadata
 
 ```{r}
 setwd ("/net/fs-1/home01/jeag/")
@@ -75,7 +75,7 @@ metadata <- sample_data(ps_nocontam)
 
 ```
 
-Renaming the the taxa to something human-friendly, and copy the ASV sequences to the reference sequence slot of the phyloseq object
+##Renaming the the taxa to something human-friendly, and copy the ASV sequences to the reference sequence slot of the phyloseq object
 
 ```{r}
 # The taxa names are the actual ASV sequences, and this makes for messy displays
@@ -137,7 +137,7 @@ ps_nocontam2 <- subset_samples(ps_nocontam1, Sample_type == "Digesta")
 ```
 
 
-Compute alpha-diversity for the digesta samples only
+##Compute alpha-diversity for the digesta samples only
 ```{r}
 # Compute Observed features, Peilou's Evenness and Shannon's index
 adiv_npd <- alpha(ps_nocontam2, index = c("observed", "evenness_pielou", "diversity_shannon")) %>%
@@ -281,10 +281,10 @@ prow <- plot_grid(plotlist = p_list, ncol = 2, align = 'v', axis = "lr", labels 
 
 plot_grid(prow, legend, rel_widths = c(7, 1))
 # Export figure
-ggsave("Figure 3.tiff", width = 8, height = 9,
+ggsave("Figure 5.tiff", width = 8, height = 9,
        units = "in", dpi = 300, compression = "lzw")
 
-ggsave("Figure 3.pdf", width = 8, height = 9,
+ggsave("Figure 5.pdf", width = 8, height = 9,
        units = "in", dpi = 300)
 
 ```
