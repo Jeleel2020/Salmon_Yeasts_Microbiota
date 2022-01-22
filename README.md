@@ -29,6 +29,12 @@ Content of files in this resposiotry
      - 04_contam_neg.rds
      - 05_ps_LULU.rds
   - Data_Metabolic_reaction_analysis -- all the data used in the metabolic reaction analysis
+     - 01_agora_reactions.csv
+     - 02_agora_subsys.tsv
+     - 03_agora_taxa.tsv
+     - 04_count_table_jeleel.csv
+     - 05_metadata_table_jeleel.csv
+     - 06_tax_table_jeleel.csv
   - Data_pre_processing
     - 01_seqtab1
     - 02_seqtab2
